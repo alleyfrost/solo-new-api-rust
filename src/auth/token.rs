@@ -10,6 +10,8 @@ pub struct TokenContext {
     pub user_id: i64,
     pub token_id: i64,
     pub token_group: String,
+    pub model_limits_enabled: bool,
+    pub model_limits: String,
 }
 
 pub fn extract_key(headers: &HeaderMap, uri: &Uri) -> Option<String> {
@@ -44,6 +46,8 @@ pub fn validate_token(state: &AppState, key: &str) -> Result<TokenContext, ApiEr
         user_id: token.user_id,
         token_id: token.id,
         token_group: token.group.clone(),
+        model_limits_enabled: token.model_limits_enabled,
+        model_limits: token.model_limits.clone(),
     })
 }
 

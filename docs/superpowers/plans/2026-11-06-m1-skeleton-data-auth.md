@@ -1378,9 +1378,8 @@ use crate::state::{AppState, Caches};
 pub fn available_models(caches: &Caches, ctx: &TokenContext) -> Vec<String> {
     let mut models: Vec<String> = caches.abilities.iter()
         .filter(|((group, _), _)| group == &ctx.token_group)
-        .filter(|((_, _), rows)| rows.iter().any(|a| a.enabled))
         .filter(|((_, _), rows)| rows.iter().any(|a| {
-            caches.channels.get(&a.channel_id).map(|c| c.status == 1).unwrap_or(false)
+            a.enabled && caches.channels.get(&a.channel_id).map(|c| c.status == 1).unwrap_or(false)
         }))
         .map(|((_, model), _)| model.clone())
         .collect();

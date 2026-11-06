@@ -30,10 +30,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             state.clone(),
             auth::admin::admin_auth,
         ));
+    let relay_routes = axum::Router::new()
+        .route("/v1/models", axum::routing::get(routes::models::list_models))
+        .route("/v1/models/{model}", axum::routing::get(routes::models::retrieve_model))
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            auth::token::token_auth,
+        ));
     let app = axum::Router::new()
         .merge(routes::public_router())
         .merge(login_route)
         .merge(self_route)
+        .merge(relay_routes)
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", config.port)).await?;
