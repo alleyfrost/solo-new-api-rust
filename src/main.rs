@@ -1,4 +1,4 @@
-use solo_new_api_rust::{auth, config, db, routes, state};
+use solo_new_api_rust::{auth, config, db, logging, routes, state};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -18,12 +18,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     })?;
     let caches = state::Caches::load(&pool).await?;
     let jwt_secret = auth::session::load_or_create_secret(&config.jwt_secret_path)?;
-    let state = state::AppState {
-        config: config.clone(),
-        pool,
-        caches: std::sync::Arc::new(std::sync::RwLock::new(caches)),
-        jwt_secret: std::sync::Arc::new(jwt_secret),
-    };
+    let (log_tx, log_rx) = logging::channel(20_000);
+    let writer = logging::spawn_writer(pool.clone(), log_rx);
+    let state = state::AppState::new(config.clone(), pool, caches, jwt_secret, Some(log_tx));
 
     let login_route = axum::Router::new()
         .route("/api/user/login", axum::routing::post(routes::user::login))
@@ -64,6 +61,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), writer).await;
     Ok(())
 }
 

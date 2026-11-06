@@ -2,6 +2,7 @@ pub mod auth;
 pub mod config;
 pub mod db;
 pub mod error;
+pub mod logging;
 pub mod model;
 pub mod retry;
 pub mod routing;

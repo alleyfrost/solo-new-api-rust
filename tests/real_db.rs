@@ -1,7 +1,6 @@
 use axum::body::Body;
 use axum::http::Request;
 use http_body_util::BodyExt;
-use std::sync::{Arc, RwLock};
 use tower::ServiceExt;
 
 #[tokio::test]
@@ -42,12 +41,13 @@ async fn real_db_schema_caches_and_token_models() {
         trust_proxy_headers: true,
         max_request_bytes: 64 * 1024 * 1024,
     };
-    let state = solo_new_api_rust::state::AppState {
-        config: cfg,
-        pool: pool.clone(),
-        caches: Arc::new(RwLock::new(caches)),
-        jwt_secret: Arc::new(b"test-secret".to_vec()),
-    };
+    let state = solo_new_api_rust::state::AppState::new(
+        cfg,
+        pool.clone(),
+        caches,
+        b"test-secret".to_vec(),
+        None,
+    );
     let app = axum::Router::new()
         .route("/v1/models", axum::routing::get(solo_new_api_rust::routes::models::list_models))
         .layer(axum::middleware::from_fn_with_state(state.clone(), solo_new_api_rust::auth::token::token_auth))

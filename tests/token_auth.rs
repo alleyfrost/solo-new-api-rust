@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
 use axum::body::Body;
 use axum::http::Request;
 use axum::routing::get;
@@ -30,12 +29,13 @@ fn state_with(caches: solo_new_api_rust::state::Caches) -> solo_new_api_rust::st
         jwt_secret_path: "/tmp/.jwt-test".into(), trust_proxy_headers: true,
         max_request_bytes: 64 * 1024 * 1024,
     };
-    solo_new_api_rust::state::AppState {
-        config: cfg,
-        pool: sqlx::SqlitePool::connect_lazy("sqlite::memory:").unwrap(),
-        caches: Arc::new(RwLock::new(caches)),
-        jwt_secret: Arc::new(b"test-secret".to_vec()),
-    }
+    solo_new_api_rust::state::AppState::new(
+        cfg,
+        sqlx::SqlitePool::connect_lazy("sqlite::memory:").unwrap(),
+        caches,
+        b"test-secret".to_vec(),
+        None,
+    )
 }
 
 fn state() -> solo_new_api_rust::state::AppState {

@@ -53,4 +53,27 @@ pub struct AppState {
     pub pool: SqlitePool,
     pub caches: Arc<RwLock<Caches>>,
     pub jwt_secret: Arc<Vec<u8>>,
+    pub client: reqwest::Client,
+    pub routing: Arc<crate::routing::RoutingState>,
+    pub log_tx: Option<tokio::sync::mpsc::Sender<crate::logging::LogEntry>>,
+}
+
+impl AppState {
+    pub fn new(
+        config: Config,
+        pool: SqlitePool,
+        caches: Caches,
+        jwt_secret: Vec<u8>,
+        log_tx: Option<tokio::sync::mpsc::Sender<crate::logging::LogEntry>>,
+    ) -> Self {
+        Self {
+            config,
+            pool,
+            caches: Arc::new(RwLock::new(caches)),
+            jwt_secret: Arc::new(jwt_secret),
+            client: crate::upstream::build_client(),
+            routing: Arc::new(crate::routing::RoutingState::new()),
+            log_tx,
+        }
+    }
 }

@@ -3,7 +3,6 @@ use axum::http::Request;
 use http_body_util::BodyExt;
 use sqlx::SqlitePool;
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
 use tower::ServiceExt;
 
 #[tokio::test]
@@ -32,10 +31,9 @@ async fn refresh_rotates_token_then_logout_revokes() {
         jwt_secret_path: "/tmp/.jwt-test".into(), trust_proxy_headers: true,
         max_request_bytes: 64 * 1024 * 1024,
     };
-    let state = solo_new_api_rust::state::AppState {
-        config: cfg, pool, caches: Arc::new(RwLock::new(caches)),
-        jwt_secret: Arc::new(b"test-secret".to_vec()),
-    };
+    let state = solo_new_api_rust::state::AppState::new(
+        cfg, pool, caches, b"test-secret".to_vec(), None,
+    );
     let login = axum::Router::new()
         .route("/api/user/login", axum::routing::post(solo_new_api_rust::routes::user::login))
         .route("/api/user/auth/refresh", axum::routing::post(solo_new_api_rust::routes::user::refresh))
