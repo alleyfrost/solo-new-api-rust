@@ -18,7 +18,7 @@
 | 编号 | 决策 | 说明 |
 | --- | --- | --- |
 | D1 | 单用户、保留多 Token | 去掉多租户/充值/额度管理/兑换码/二次验证 |
-| D2 | 复用 new-api 前端并裁剪 | 只保留登录、Token、渠道、日志、用量看板、模型 |
+| D2 | 复用 new-api 前端并裁剪 | 只保留登录、Token、渠道、日志、用量看板、模型、个人资料、Playground 与裁剪后的系统设置（站点信息 + 日志维护） |
 | D3 | 只记用量不记费用 | `logs` 继续写 token 数/耗时/渠道等，`quota=0`；不做费用与额度扣减 |
 | D4 | 协议尽量全覆盖 | OpenAI 全套 + Anthropic Messages + Responses；不含 Gemini 原生/MJ/任务/插件 |
 | D5 | 部署：本地编译后上传 | 本地交叉编译 linux/amd64，上传产物，替换现有 Docker 服务 |
@@ -122,7 +122,7 @@
 | 用量日志 | 复刻 | 已实现 | M3：列表/筛选/统计/用户详情；导出沿用前端流式接口。M4 收敛为通用日志：任务/MJ 日志、金额与定价展示、审计与请求策略详情随对应后端一起裁剪 |
 | 用量看板 | 复刻 | 已实现 | M3：概览与模型调用分析按 logs 聚合；M4 金额口径全部改为用量口径（tokens/次数/耗时） |
 | 模型管理 | 复刻（基础） | 已实现 | M3：列表/新建/编辑/启停/软删除；M4 补齐 `include_channel_models` 的渠道模型并集与广场状态派生（`square_state` 按 abilities/channels 计算，含按状态筛选后的分页）、`configured_channel_count`/`bound_channels`/`enable_groups`/`matched_models` 富化、`vendor_counts` 与 `/api/vendors` 真实读取；裁剪部署、供应商运营与上游同步。与 Go 的唯一可见差异：渠道派生行（`id=0`）的“展示策略”列显示 `—`，Go 会按 `status=0` 显示“未展示”，但那是对一条本就没有的规则做断言 |
-| 系统设置 | 不复刻 | 不复刻 | 配置走环境变量/少量 DB option |
+| 系统设置 | 复刻（裁剪） | 已实现 | M5：站点信息（SystemName/Logo/Notice/ServerAddress）+ 日志维护（记录用量日志开关、登录用户导出开关、最大导出跨度、按时间分批清理历史日志）。`GET/PUT /api/option` 走 7 键白名单：读取按白名单合成（缺行回落内置默认），写入只落白名单键，非白名单键与非法值返回 Go 风格业务错误；`/api/status`、`/api/notice` 与导出跨度都改读这份设置。请求策略（重试次数/auto_ban/会话亲和/敏感词）与安全与限制（限流/SSRF/令牌上限）不复刻，路由与重试沿用内置策略并在各渠道内配置 |
 | 用户管理 / 钱包 / 订阅 / 兑换码 | 不复刻 | 不复刻 | 单用户 |
 | 安全（2FA/Passkey）/ 个人资料 | 个人资料复刻，2FA/Passkey 不复刻 | 已实现 | 个人资料 = 基本资料 + 改密码 + 会话管理 |
 | Playground | 复刻 | 已实现 | M4：`/pg/chat/completions` 直连本地转发，不做聊天历史持久化 |
@@ -159,9 +159,12 @@
 | 管理 API | 通过 | token/channel/models/group/log/stat/data 全部 `success:true` |
 | 浏览器逐页实测（2026-11-07，宿主机直跑 + 最新 `web/dist`） | 通过 | `/keys` 分组列只显示 `default`/`vip`（臆造的 1x 倍数已移除）；`/playground` 空状态与输入区（模型/分组选择器、发送）正常；`/profile` = 基本资料 + 改密码 + 会话管理，用量卡为 API 请求 / 输入 Token / 输出 Token；`/dashboard/flow` 桑基图按 logs 聚合出 用户→节点→令牌→分组→模型→渠道；`/models/metadata` 列出 6 个渠道派生模型，广场状态、绑定渠道与分组正确；页面零 console error，XHR 全 200 |
 | i18n 覆盖对账 | 通过 | 提取 `web/src` 全部 `t('…')` 字面量与 `zh.json` 比对，仅个人资料页两条长度提示缺 key，已补齐 7 个语言后复跑归零 |
-| 镜像重建 + 产物一致（2026-11-07） | 通过 | `deploy/build.sh` 重出 linux/amd64 镜像：镜像内 `web/dist` 入口哈希与浏览器实测那份一致（`index.ee3929f7d9.js` / `index.fe6804717b.css`），二进制构建时间晚于全部提交；容器 30.5 MiB / 450 MiB |
+| 镜像重建 + 产物一致（2026-11-07，本轮两次重编后） | 通过 | `deploy/build.sh` 重出 linux/amd64 镜像：镜像内 `web/dist` 入口哈希与浏览器实测加载的那份一致（`index.9d2c7d4d62.js` / `index.c9a0673030.css`，由页面 resource 条目核对），二进制构建时间晚于全部提交；容器 19.8–25.2 MiB / 450 MiB |
 | Docker 登录态逐页实测（:3006，2026-11-07） | 通过 | `/models/metadata` 总计 6、全部 缺元数据 / 正常展示 / 渠道 2·分组 2；`/keys` 分组列只显示 `default`/`vip`；`/channels` 批量测试 6/6 成功（164–169 毫秒，打到本地 mock）；`/api/channel/fetch_models/3` 给出 2 个新模型 + 6 个已移除；`/playground`、`/profile`（含新译的“使用 1–20 个字符。”）、`/dashboard/flow`、`/usage-logs/common` 零 console error、XHR 全 200；日志表头为 时间/渠道/用户/令牌/模型/流/Token/总 Token 数/耗时/详情，无金额列 |
-| 转发/流式/内存矩阵本轮未重跑 | 说明 | 本轮后端改动只在 `src/routes/admin/models.rs` 与 `src/routes/user.rs` 的分组接口，`src/relay/*` 与上一轮通过本节全部转发、流式、断连、并发内存项时同源；渠道测试 6/6 走的是同一套上游客户端与协议转换，只作为新二进制的间接证据 |
+| 系统设置接口（Docker :3006） | 通过 | 写入只落白名单键：`options` 行数 24 → 29（`LogConsumeEnabled` 保持内置默认未落库，共 6 行落库）；Go 侧原有 23 行零改动（`RetryTimes=10`、`HeaderNavModules`、`SidebarModulesAdmin`、`theme.frontend`、`passkey.*`、`payment_setting.*`、`AutomaticEnableChannelEnabled` 等），`PRAGMA integrity_check` ok。`GET /api/option/` 只返回 7 个白名单键；非白名单键与非法值给 Go 风格 `success:false` |
+| 设置页浏览器实测（Docker :3006，2026-11-07） | 通过 | 站点信息四项可输入并保存，`/api/status` 与顶栏品牌即时更新，刷新后回读到 `SystemName=Solo 本地验收站`、`ServerAddress=https://api.example.com`；日志卡两个开关与最大导出跨度=45 保存后回读一致，跨度即时生效——60 天跨度导出返回“The time range cannot exceed 45 days”；“24 小时前”快捷钮写入截止时间；清理确认对话框（AlertDialog）确认后 23 批删除 113,666 条，日志总数 128,210 → 14,544 与 `/api/log/` 读数一致，单批最慢 91ms、全部 200，容器内存 25.2 MiB / 450 MiB |
+| 本轮实测发现并修复的两个缺陷 | 已修复 | ① 设置页无限重渲染：`useOptions()` 每帧返回新的 `values` 对象，两张卡的 `useEffect(…, [loaded])` 因此每帧 `setValues` 新对象，输入在同一 tick 被回滚、该标签页渲染进程 100% CPU。改为 `useMemo` 依赖 `query.data`（loading 期用固定空数组引用）并加 `web/src/features/settings/__tests__/use-settings.test.tsx`（改前 2 例红、改后 3 例绿），顺带把站点卡的 label 与输入框拆成兄弟节点修掉提示语换行。<br>② 历史清理返回 500：默认批次 50_000 行按 id 逐行绑定，超过该 SQLite 构建的 32766 绑定变量上限，报 `too many SQL variables`（现网快照 128,210 行、早于 24 小时的有 113,666 行时才暴露，原来的集成测试只造 200 行看不见）。删除集改为单语句子查询 `DELETE FROM logs WHERE id IN (SELECT … LIMIT ?)`（只绑 2 个变量），默认批次 5_000、上限 50_000，并加 `cleanup_round_can_delete_more_rows_than_sqlite_allows_binds`（100_000 行夹具、40_000 行匹配，改前复现同一条 500 报文、改后绿） |
+| 转发/流式/内存矩阵本轮未重跑 | 说明 | 本轮后端改动只在设置白名单模块（`src/settings.rs`、`src/routes/admin/option.rs`）、日志清理批次（`src/routes/admin/log.rs` 的 `cleanup`）与 status/notice 读取；`src/relay/*` 与上一轮通过本节全部转发、流式、断连、并发内存项时同源。全量 `cargo test` 152 例通过、`bun run test` 与 `bun run typecheck` 通过；渠道测试 6/6 走的是同一套上游客户端与协议转换，只作为新二进制的间接证据 |
 
 - 注意：容器运行期间不要用宿主机 `sqlite3`/`python` 改 `/tmp/solo-deploy-data/one-api.db`。宿主与 VM 共用同一 WAL `-shm` 映射会触发 `SQLITE_IOERR_WRITE (522)`，日志写失败是测试手法造成的假故障；改库要先 `docker stop`，查日志改用 `/api/log`。
 - 本轮 Docker 登录用的是写在 `/tmp/solo-deploy-data` scratch 副本里的一次性 argon2id 口令（仓库快照 `data/one-api-consistent.db` 与线上库未改动），渠道 `base_url` 也只在这份副本里改指向 mock；验收后整个目录连同容器一起删除。要自己复核就重跑 `bash deploy/run-local.sh`，它会从快照重新播种，届时用真实口令登录。
