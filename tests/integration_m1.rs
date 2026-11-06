@@ -23,6 +23,7 @@ async fn status_returns_success() {
             abilities: Default::default(),
             options: Default::default(),
         })),
+        jwt_secret: std::sync::Arc::new(b"test-secret".to_vec()),
     };
     let app = solo_new_api_rust::routes::public_router().with_state(state);
     let res = app.oneshot(

@@ -2,6 +2,7 @@ use axum::Router;
 use crate::state::AppState;
 
 pub mod status;
+pub mod user;
 
 pub fn public_router() -> Router<AppState> {
     Router::new()

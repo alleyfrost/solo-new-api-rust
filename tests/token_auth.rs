@@ -34,6 +34,7 @@ fn state_with(caches: solo_new_api_rust::state::Caches) -> solo_new_api_rust::st
         config: cfg,
         pool: sqlx::SqlitePool::connect_lazy("sqlite::memory:").unwrap(),
         caches: Arc::new(RwLock::new(caches)),
+        jwt_secret: Arc::new(b"test-secret".to_vec()),
     }
 }
 

@@ -52,4 +52,5 @@ pub struct AppState {
     pub config: Config,
     pub pool: SqlitePool,
     pub caches: Arc<RwLock<Caches>>,
+    pub jwt_secret: Arc<Vec<u8>>,
 }
