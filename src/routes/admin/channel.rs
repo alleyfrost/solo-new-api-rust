@@ -89,6 +89,8 @@ pub fn router() -> Router<AppState> {
         .route("/api/channel/default_base_urls", get(default_base_urls))
         .route("/api/channel/ops", get(ops))
         .route("/api/channel/priority/order", get(priority_order))
+        .route("/api/channel/priority/reorder", post(reorder_priority))
+        .route("/api/channel/fix", post(fix_abilities))
         .route("/api/channel/batch", post(batch_delete))
         .route("/api/channel/status/batch", post(batch_status))
         .route("/api/channel/{id}", get(get_one).delete(delete_one))
@@ -685,21 +687,114 @@ pub async fn default_base_urls() -> axum::response::Response {
     json_ok(&json!({}))
 }
 
+/// 快照按 id 升序，revision 是它的指纹；前端提交时原样带回用于并发校验。
+async fn priority_items(
+    conn: &mut sqlx::sqlite::SqliteConnection,
+) -> Result<Vec<crate::priority::Item>, sqlx::Error> {
+    let rows: Vec<(i64, Option<i64>)> =
+        sqlx::query_as("SELECT id, priority FROM channels ORDER BY id")
+            .fetch_all(&mut *conn)
+            .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(id, priority)| crate::priority::Item { id, priority })
+        .collect())
+}
+
+fn order_json(
+    items: &[crate::priority::Item],
+    changes: &[crate::priority::Change],
+) -> Value {
+    json!({
+        "revision": crate::priority::revision(items),
+        "items": items,
+        "changes": changes,
+    })
+}
+
 pub async fn priority_order(
     State(state): State<AppState>,
 ) -> Result<axum::response::Response, ApiError> {
-    let rows: Vec<(i64, Option<i64>)> =
-        sqlx::query_as("SELECT id, priority FROM channels ORDER BY priority DESC, id ASC")
+    let mut conn = state.pool.acquire().await.map_err(internal)?;
+    let items = priority_items(&mut conn).await.map_err(internal)?;
+    Ok(json_ok(&order_json(&items, &[])))
+}
+
+/// 拖拽排序：preview 只算不写；正式提交在一个事务里同时改 channels 与 abilities，
+/// 否则路由缓存会读到与渠道表不一致的优先级。
+pub async fn reorder_priority(
+    State(state): State<AppState>,
+    Json(mv): Json<crate::priority::Move>,
+) -> Result<axum::response::Response, ApiError> {
+    let business = |message: &'static str| ApiError::new(StatusCode::OK, message);
+    if mv.preview {
+        let mut conn = state.pool.acquire().await.map_err(internal)?;
+        let items = priority_items(&mut conn).await.map_err(internal)?;
+        let changes = crate::priority::plan(&items, &mv).map_err(business)?;
+        let items = crate::priority::apply(&items, &changes);
+        return Ok(json_ok(&order_json(&items, &changes)));
+    }
+
+    let mut tx = state.pool.begin().await.map_err(internal)?;
+    let items = priority_items(&mut *tx).await.map_err(internal)?;
+    let changes = crate::priority::plan(&items, &mv).map_err(business)?;
+    for change in &changes {
+        sqlx::query("UPDATE channels SET priority=? WHERE id=?")
+            .bind(change.priority)
+            .bind(change.id)
+            .execute(&mut *tx)
+            .await
+            .map_err(internal)?;
+        sqlx::query("UPDATE abilities SET priority=? WHERE channel_id=?")
+            .bind(change.priority)
+            .bind(change.id)
+            .execute(&mut *tx)
+            .await
+            .map_err(internal)?;
+    }
+    let items = crate::priority::apply(&items, &changes);
+    tx.commit().await.map_err(internal)?;
+    if !changes.is_empty() {
+        state.reload_caches().await.map_err(internal)?;
+    }
+    Ok(json_ok(&order_json(&items, &changes)))
+}
+
+/// 按 channels 全量重建 abilities，修复人工改库或与 Go 交替写入造成的路由漂移。
+pub async fn fix_abilities(
+    State(state): State<AppState>,
+) -> Result<axum::response::Response, ApiError> {
+    sqlx::query("DELETE FROM abilities")
+        .execute(&state.pool)
+        .await
+        .map_err(internal)?;
+    let rows: Vec<ChannelRow> =
+        sqlx::query_as(&format!("SELECT {SELECT_COLUMNS} FROM channels ORDER BY id"))
             .fetch_all(&state.pool)
             .await
             .map_err(internal)?;
-    let items: Vec<Value> = rows
-        .into_iter()
-        .map(|(id, priority)| json!({ "id": id, "priority": priority }))
-        .collect();
-    Ok(json_ok(&json!({
-        "revision": "0",
-        "items": items,
-        "changes": []
-    })))
+    let mut success = 0i64;
+    let mut fails = 0i64;
+    for row in &rows {
+        let result = rebuild_abilities(
+            &state,
+            row.id,
+            &row.models,
+            &row.group,
+            row.status,
+            row.priority.unwrap_or(0),
+            row.weight.unwrap_or(0),
+            row.tag.as_deref(),
+        )
+        .await;
+        match result {
+            Ok(()) => success += 1,
+            Err(error) => {
+                fails += 1;
+                tracing::warn!("rebuild abilities for channel {} failed: {error:?}", row.id);
+            }
+        }
+    }
+    state.reload_caches().await.map_err(internal)?;
+    Ok(json_ok(&json!({ "success": success, "fails": fails })))
 }
