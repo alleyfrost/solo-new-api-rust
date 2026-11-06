@@ -17,6 +17,9 @@ pub async fn get_status() -> Response {
         "quota_per_unit": 500000,
         "register_enabled": false,
         "password_register_enabled": false,
+        // 导出开关与最长跨度要和 /api/log/export 的服务端校验一致，否则前端选得出、后端拒得了。
+        "log_export_enabled": true,
+        "log_max_range_days": crate::routes::admin::log::MAX_EXPORT_DAYS,
         "HeaderNavModules": {
             "home": false,
             "console": true,

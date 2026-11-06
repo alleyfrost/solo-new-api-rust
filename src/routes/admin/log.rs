@@ -1,11 +1,16 @@
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
+
+use axum::body::Body;
 use axum::extract::{Extension, Query, State};
 use axum::http::StatusCode;
+use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
+use axum::response::Response;
 use axum::routing::get;
 use axum::Router;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use sqlx::QueryBuilder;
-use sqlx::Sqlite;
+use sqlx::{QueryBuilder, Sqlite, SqlitePool};
 
 use crate::auth::admin::AdminContext;
 use crate::error::{ApiError, json_ok};
@@ -52,11 +57,49 @@ struct LogRow {
     other: String,
 }
 
+const LOG_SELECT: &str = "SELECT id, user_id, created_at, type AS log_type, COALESCE(content,'') AS content, \
+     COALESCE(username,'') AS username, COALESCE(token_name,'') AS token_name, \
+     COALESCE(model_name,'') AS model_name, COALESCE(quota,0) AS quota, \
+     COALESCE(prompt_tokens,0) AS prompt_tokens, COALESCE(completion_tokens,0) AS completion_tokens, \
+     COALESCE(use_time,0) AS use_time, COALESCE(is_stream,0) AS is_stream, \
+     COALESCE(channel_id,0) AS channel_id, COALESCE(channel_name,'') AS channel_name, \
+     COALESCE(token_id,0) AS token_id, COALESCE(`group`,'') AS group_name, \
+     COALESCE(ip,'') AS ip, COALESCE(request_id,'') AS request_id, \
+     COALESCE(upstream_request_id,'') AS upstream_request_id, COALESCE(other,'') AS other FROM logs";
+
+fn log_json(r: &LogRow) -> Value {
+    json!({
+        "id": r.id,
+        "user_id": r.user_id,
+        "created_at": r.created_at,
+        "type": r.log_type,
+        "content": r.content,
+        "username": r.username,
+        "token_name": r.token_name,
+        "model_name": r.model_name,
+        "quota": r.quota,
+        "prompt_tokens": r.prompt_tokens,
+        "completion_tokens": r.completion_tokens,
+        "use_time": r.use_time,
+        "is_stream": r.is_stream,
+        "channel": r.channel_id,
+        "channel_name": r.channel_name,
+        "token_id": r.token_id,
+        "group": r.group_name,
+        "ip": r.ip,
+        "request_id": r.request_id,
+        "upstream_request_id": r.upstream_request_id,
+        "other": r.other,
+    })
+}
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/log", get(list))
         .route("/api/log/", get(list))
         .route("/api/log/self", get(list_self))
+        .route("/api/log/export", get(export))
+        .route("/api/log/self/export", get(export_self))
         .route("/api/log/stat", get(stat))
         .route("/api/log/self/stat", get(stat_self))
 }
@@ -122,17 +165,7 @@ async fn list_inner(
         .await
         .map_err(internal)?;
 
-    let mut qb = QueryBuilder::<Sqlite>::new(
-        "SELECT id, user_id, created_at, type AS log_type, COALESCE(content,'') AS content, \
-         COALESCE(username,'') AS username, COALESCE(token_name,'') AS token_name, \
-         COALESCE(model_name,'') AS model_name, COALESCE(quota,0) AS quota, \
-         COALESCE(prompt_tokens,0) AS prompt_tokens, COALESCE(completion_tokens,0) AS completion_tokens, \
-         COALESCE(use_time,0) AS use_time, COALESCE(is_stream,0) AS is_stream, \
-         COALESCE(channel_id,0) AS channel_id, COALESCE(channel_name,'') AS channel_name, \
-         COALESCE(token_id,0) AS token_id, COALESCE(`group`,'') AS group_name, \
-         COALESCE(ip,'') AS ip, COALESCE(request_id,'') AS request_id, \
-         COALESCE(upstream_request_id,'') AS upstream_request_id, COALESCE(other,'') AS other FROM logs",
-    );
+    let mut qb = QueryBuilder::<Sqlite>::new(LOG_SELECT);
     push_filters(&mut qb, &query, user_id);
     qb.push(" ORDER BY id DESC LIMIT ")
         .push_bind(size)
@@ -143,34 +176,7 @@ async fn list_inner(
         .fetch_all(&state.pool)
         .await
         .map_err(internal)?;
-    let items: Vec<Value> = rows
-        .iter()
-        .map(|r| {
-            json!({
-                "id": r.id,
-                "user_id": r.user_id,
-                "created_at": r.created_at,
-                "type": r.log_type,
-                "content": r.content,
-                "username": r.username,
-                "token_name": r.token_name,
-                "model_name": r.model_name,
-                "quota": r.quota,
-                "prompt_tokens": r.prompt_tokens,
-                "completion_tokens": r.completion_tokens,
-                "use_time": r.use_time,
-                "is_stream": r.is_stream,
-                "channel": r.channel_id,
-                "channel_name": r.channel_name,
-                "token_id": r.token_id,
-                "group": r.group_name,
-                "ip": r.ip,
-                "request_id": r.request_id,
-                "upstream_request_id": r.upstream_request_id,
-                "other": r.other,
-            })
-        })
-        .collect();
+    let items: Vec<Value> = rows.iter().map(log_json).collect();
     Ok(json_ok(&json!({
         "items": items,
         "total": total.0,
@@ -242,6 +248,153 @@ pub async fn stat_self(
     Query(query): Query<LogQuery>,
 ) -> Result<axum::response::Response, ApiError> {
     stat_inner(&state, query, Some(ctx.user_id)).await
+}
+
+/// 一次导出可覆盖的最长时间跨度，与前端 `DEFAULT_MAX_RANGE_DAYS` 一致。
+pub const MAX_EXPORT_DAYS: i64 = 365;
+
+/// 导出分页大小：单页约千条日志，处理完即释放，避免整表驻留内存。
+const EXPORT_PAGE_SIZE: i64 = 1_000;
+
+/// 同一用户同时只允许一个导出；句柄离开作用域（含客户端断连丢流）即释放。
+struct ExportSlot {
+    busy: Arc<Mutex<HashSet<i64>>>,
+    user_id: i64,
+}
+
+impl Drop for ExportSlot {
+    fn drop(&mut self) {
+        if let Ok(mut guard) = self.busy.lock() {
+            guard.remove(&self.user_id);
+        }
+    }
+}
+
+fn claim_export_slot(busy: &Arc<Mutex<HashSet<i64>>>, user_id: i64) -> Option<ExportSlot> {
+    let mut guard = busy.lock().expect("export slots lock");
+    // 不能写成 `insert(id).then_some(ExportSlot { .. })`：临时句柄会在 guard 仍持锁时析构，
+    // Drop 再锁同一个非重入 Mutex，被拒绝的并发请求会当场死锁。
+    if guard.insert(user_id) {
+        Some(ExportSlot { busy: Arc::clone(busy), user_id })
+    } else {
+        None
+    }
+}
+
+fn export_range(query: &LogQuery) -> Result<(i64, i64), ApiError> {
+    let max_secs = MAX_EXPORT_DAYS * 24 * 60 * 60;
+    let end = query
+        .end_timestamp
+        .filter(|v| *v > 0)
+        .map_or_else(now, |v| v.min(now()));
+    match query.start_timestamp.filter(|v| *v > 0) {
+        Some(start) if end - start > max_secs => Err(ApiError::new(
+            StatusCode::OK,
+            format!("The time range cannot exceed {MAX_EXPORT_DAYS} days"),
+        )),
+        Some(start) => Ok((start, end)),
+        None => Ok((end - max_secs, end)),
+    }
+}
+
+fn ndjson_line(value: &Value) -> axum::body::Bytes {
+    let mut buf = serde_json::to_vec(value).unwrap_or_default();
+    buf.push(b'\n');
+    axum::body::Bytes::from(buf)
+}
+
+/// 按 id 游标分页取日志；每页独立持有连接，导出全程不缓存整张结果集。
+async fn export_page(
+    pool: &SqlitePool,
+    query: &LogQuery,
+    scoped_user: Option<i64>,
+    before: Option<i64>,
+) -> Result<Vec<LogRow>, sqlx::Error> {
+    let mut qb = QueryBuilder::<Sqlite>::new(LOG_SELECT);
+    push_filters(&mut qb, query, scoped_user);
+    if let Some(id) = before {
+        qb.push(" AND id < ").push_bind(id);
+    }
+    qb.push(" ORDER BY id DESC LIMIT ")
+        .push_bind(EXPORT_PAGE_SIZE);
+    qb.build_query_as::<LogRow>().fetch_all(pool).await
+}
+
+async fn export_inner(
+    state: &AppState,
+    caller: i64,
+    query: LogQuery,
+    scoped_user: Option<i64>,
+) -> Result<Response, ApiError> {
+    let (start, end) = export_range(&query)?;
+    let mut query = query;
+    query.start_timestamp = Some(start);
+    query.end_timestamp = Some(end);
+
+    let slot = claim_export_slot(&state.export_slots, caller).ok_or_else(|| {
+        ApiError::new(
+            StatusCode::OK,
+            "Another log export is running. Try again after it finishes.",
+        )
+    })?;
+
+    let pool = state.pool.clone();
+    let stream = async_stream::stream! {
+        let mut count: i64 = 0;
+        let mut failed = false;
+        let mut before: Option<i64> = None;
+        loop {
+            match export_page(&pool, &query, scoped_user, before).await {
+                Ok(rows) => {
+                    let Some(last) = rows.last().map(|r| r.id) else { break };
+                    before = Some(last);
+                    let full = rows.len() as i64 == EXPORT_PAGE_SIZE;
+                    for row in rows {
+                        count += 1;
+                        yield Ok::<_, std::io::Error>(ndjson_line(&log_json(&row)));
+                    }
+                    if !full { break; }
+                }
+                Err(e) => {
+                    tracing::warn!("log export page failed: {e}");
+                    failed = true;
+                    break;
+                }
+            }
+        }
+        let result = if failed {
+            json!({ "success": false, "message": "Failed to export logs" })
+        } else {
+            json!({ "success": true, "message": "", "data": { "count": count } })
+        };
+        yield Ok::<_, std::io::Error>(ndjson_line(&result));
+        drop(slot);
+    };
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(CONTENT_TYPE, "application/x-ndjson; charset=utf-8")
+        .header(CACHE_CONTROL, "no-store")
+        .header("x-accel-buffering", "no")
+        .body(Body::from_stream(stream))
+        .map_err(|e| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+}
+
+pub async fn export(
+    State(state): State<AppState>,
+    Extension(ctx): Extension<AdminContext>,
+    Query(query): Query<LogQuery>,
+) -> Result<Response, ApiError> {
+    export_inner(&state, ctx.user_id, query, None).await
+}
+
+pub async fn export_self(
+    State(state): State<AppState>,
+    Extension(ctx): Extension<AdminContext>,
+    Query(query): Query<LogQuery>,
+) -> Result<Response, ApiError> {
+    let user_id = ctx.user_id;
+    export_inner(&state, user_id, query, Some(user_id)).await
 }
 
 fn now() -> i64 {

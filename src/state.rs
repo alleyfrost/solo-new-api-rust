@@ -1,5 +1,5 @@
-use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex, RwLock};
 use sqlx::SqlitePool;
 use crate::config::Config;
 use crate::model::{AbilityRow, ChannelRow, TokenRow, UserRow};
@@ -56,6 +56,8 @@ pub struct AppState {
     pub client: reqwest::Client,
     pub routing: Arc<crate::routing::RoutingState>,
     pub log_tx: Option<tokio::sync::mpsc::Sender<crate::logging::LogEntry>>,
+    /// 正在导出日志的用户；同一用户同时只允许一个导出。
+    pub export_slots: Arc<Mutex<HashSet<i64>>>,
 }
 
 impl AppState {
@@ -74,6 +76,7 @@ impl AppState {
             client: crate::upstream::build_client(),
             routing: Arc::new(crate::routing::RoutingState::new()),
             log_tx,
+            export_slots: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
