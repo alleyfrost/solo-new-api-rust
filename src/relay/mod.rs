@@ -276,4 +276,5 @@ pub mod extra;
 pub mod forward;
 pub mod messages;
 pub mod passthrough;
+pub mod playground;
 pub mod responses;

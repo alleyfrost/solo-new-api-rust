@@ -120,12 +120,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let admin_routes = routes::admin::router().route_layer(
         axum::middleware::from_fn_with_state(state.clone(), auth::admin::admin_auth),
     );
+    // 对话调试页走会话认证，不带客户端 token；选路与 /v1 走同一套流水线。
+    let playground_route = axum::Router::new()
+        .route(
+            "/pg/chat/completions",
+            axum::routing::post(solo_new_api_rust::relay::playground::chat_completions),
+        )
+        .layer(axum::extract::DefaultBodyLimit::max(
+            config.max_request_bytes,
+        ))
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            auth::admin::admin_auth,
+        ));
     let web_dist = config.web_dist.clone();
     let app = axum::Router::new()
         .merge(routes::public_router())
         .merge(login_route)
         .merge(self_route)
         .merge(admin_routes)
+        .merge(playground_route)
         .merge(relay_routes)
         .with_state(state)
         .fallback_service(solo_new_api_rust::web::spa_service(web_dist));
