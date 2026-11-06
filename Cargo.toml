@@ -1,0 +1,27 @@
+[package]
+name = "solo-new-api-rust"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96.0"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+axum = { version = "0.8", features = ["macros"] }
+tower-http = { version = "0.6", features = ["cors", "fs", "compression-gzip", "decompression-gzip", "trace"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio", "macros"] }
+argon2 = "0.5"
+jsonwebtoken = "9"
+uuid = { version = "1", features = ["v4"] }
+sha2 = "0.10"
+rand = "0.8"
+regex = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tower = "0.5"
+hyper = "1"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"

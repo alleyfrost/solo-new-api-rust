@@ -1,0 +1,11 @@
+use axum::Router;
+use crate::state::AppState;
+
+pub mod status;
+
+pub fn public_router() -> Router<AppState> {
+    Router::new()
+        .route("/api/status", axum::routing::get(status::get_status))
+        .route("/api/notice", axum::routing::get(status::get_notice))
+        .route("/api/group", axum::routing::get(status::get_group))
+}
