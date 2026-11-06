@@ -28,6 +28,23 @@ fn channel(
         channel_info: None,
         model_mapping: None,
         header_override: None,
+        created_time: None,
+        test_time: None,
+        response_time: None,
+        open_ai_organization: None,
+        test_model: None,
+        other: None,
+        balance: None,
+        balance_updated_time: None,
+        used_quota: None,
+        status_code_mapping: None,
+        auto_ban: None,
+        other_info: None,
+        tag: None,
+        setting: None,
+        param_override: None,
+        remark: None,
+        settings: None,
     }
 }
 

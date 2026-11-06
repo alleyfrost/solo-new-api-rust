@@ -15,6 +15,7 @@ fn token(key: &str, group: &str, limits_enabled: bool, limits: &str) -> TokenRow
         expired_time: -1, remain_quota: 0, unlimited_quota: true,
         model_limits_enabled: limits_enabled, model_limits: limits.into(), allow_ips: None,
         group: group.into(), auto_groups: None, cross_group_retry: false,
+        created_time: None, accessed_time: None, used_quota: None, allow_user_quota_query: None,
     }
 }
 
@@ -38,6 +39,11 @@ fn caches() -> Caches {
         models: "m1,m2,m3".into(), group: "vip".into(), base_url: None,
         priority: None, weight: None, channel_info: Some("{}".into()),
         model_mapping: None, header_override: None,
+        created_time: None, test_time: None, response_time: None,
+        open_ai_organization: None, test_model: None, other: None,
+        balance: None, balance_updated_time: None, used_quota: None,
+        status_code_mapping: None, auto_ban: None, other_info: None,
+        tag: None, setting: None, param_override: None, remark: None, settings: None,
     });
     let mut abilities = HashMap::new();
     abilities.insert(("vip".to_string(), "m1".to_string()), vec![ability("vip", "m1", 3, true)]);

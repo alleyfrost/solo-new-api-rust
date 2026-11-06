@@ -19,6 +19,7 @@ fn caches() -> solo_new_api_rust::state::Caches {
         expired_time: -1, remain_quota: 0, unlimited_quota: true,
         model_limits_enabled: false, model_limits: String::new(), allow_ips: None,
         group: "vip".into(), auto_groups: None, cross_group_retry: false,
+        created_time: None, accessed_time: None, used_quota: None, allow_user_quota_query: None,
     });
     caches
 }

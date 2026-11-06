@@ -18,6 +18,8 @@ pub struct TokenRow {
     pub key: String,
     pub status: i64,
     pub name: String,
+    pub created_time: Option<i64>,
+    pub accessed_time: Option<i64>,
     pub expired_time: i64,
     pub remain_quota: i64,
     pub unlimited_quota: bool,
@@ -27,6 +29,8 @@ pub struct TokenRow {
     pub group: String,
     pub auto_groups: Option<String>,
     pub cross_group_retry: bool,
+    pub used_quota: Option<i64>,
+    pub allow_user_quota_query: Option<bool>,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -44,6 +48,23 @@ pub struct ChannelRow {
     pub channel_info: Option<String>,
     pub model_mapping: Option<String>,
     pub header_override: Option<String>,
+    pub created_time: Option<i64>,
+    pub test_time: Option<i64>,
+    pub response_time: Option<i64>,
+    pub open_ai_organization: Option<String>,
+    pub test_model: Option<String>,
+    pub other: Option<String>,
+    pub balance: Option<f64>,
+    pub balance_updated_time: Option<i64>,
+    pub used_quota: Option<i64>,
+    pub status_code_mapping: Option<String>,
+    pub auto_ban: Option<i64>,
+    pub other_info: Option<String>,
+    pub tag: Option<String>,
+    pub setting: Option<String>,
+    pub param_override: Option<String>,
+    pub remark: Option<String>,
+    pub settings: Option<String>,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]

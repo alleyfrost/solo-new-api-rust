@@ -18,10 +18,10 @@ impl Caches {
             "SELECT id, username, password, display_name, role, status, `group`, auth_version, email FROM users WHERE deleted_at IS NULL"
         ).fetch_all(pool).await?;
         let tokens: Vec<TokenRow> = sqlx::query_as(
-            "SELECT id, user_id, `key`, status, name, expired_time, remain_quota, unlimited_quota, model_limits_enabled, model_limits, allow_ips, `group`, auto_groups, cross_group_retry FROM tokens WHERE deleted_at IS NULL"
+            "SELECT id, user_id, `key`, status, name, created_time, accessed_time, expired_time, remain_quota, unlimited_quota, model_limits_enabled, model_limits, allow_ips, `group`, auto_groups, cross_group_retry, used_quota, allow_user_quota_query FROM tokens WHERE deleted_at IS NULL"
         ).fetch_all(pool).await?;
         let channels: Vec<ChannelRow> = sqlx::query_as(
-            "SELECT id, type, `key`, status, name, models, `group`, base_url, priority, weight, channel_info, model_mapping, header_override FROM channels"
+            "SELECT id, type, `key`, status, name, models, `group`, base_url, priority, weight, channel_info, model_mapping, header_override, created_time, test_time, response_time, open_ai_organization, test_model, other, balance, balance_updated_time, used_quota, status_code_mapping, auto_ban, other_info, tag, setting, param_override, remark, settings FROM channels"
         ).fetch_all(pool).await?;
         let abilities: Vec<AbilityRow> = sqlx::query_as(
             "SELECT `group`, model, channel_id, enabled, priority, weight FROM abilities"
@@ -75,5 +75,11 @@ impl AppState {
             routing: Arc::new(crate::routing::RoutingState::new()),
             log_tx,
         }
+    }
+
+    pub async fn reload_caches(&self) -> Result<(), sqlx::Error> {
+        let fresh = Caches::load(&self.pool).await?;
+        *self.caches.write().expect("cache lock") = fresh;
+        Ok(())
     }
 }
