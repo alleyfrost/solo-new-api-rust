@@ -11,7 +11,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("{e}");
         std::process::exit(2);
     })?;
-    let state = state::AppState { config: config.clone(), pool };
+    let caches = state::Caches::load(&pool).await?;
+    let state = state::AppState {
+        config: config.clone(),
+        pool,
+        caches: std::sync::Arc::new(std::sync::RwLock::new(caches)),
+    };
     let app = routes::public_router().with_state(state);
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", config.port)).await?;
     tracing::info!("listening on :{}", config.port);

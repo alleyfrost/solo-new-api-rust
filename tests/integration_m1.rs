@@ -13,7 +13,17 @@ async fn status_returns_success() {
         max_request_bytes: 64 * 1024 * 1024,
     };
     let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
-    let state = solo_new_api_rust::state::AppState { config: cfg, pool };
+    let state = solo_new_api_rust::state::AppState {
+        config: cfg,
+        pool,
+        caches: std::sync::Arc::new(std::sync::RwLock::new(solo_new_api_rust::state::Caches {
+            users: Default::default(),
+            tokens: Default::default(),
+            channels: Default::default(),
+            abilities: Default::default(),
+            options: Default::default(),
+        })),
+    };
     let app = solo_new_api_rust::routes::public_router().with_state(state);
     let res = app.oneshot(
         axum::http::Request::builder().uri("/api/status").body(Body::empty()).unwrap()
