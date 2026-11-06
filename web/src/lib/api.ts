@@ -40,13 +40,6 @@ export type { ApiRequestConfig } from '@/lib/http-client'
 // User APIs
 // ============================================================================
 
-export async function getSelf() {
-  const res = await api.get('/api/user/self', {
-    skipErrorHandler: true,
-  })
-  return res.data
-}
-
 export async function getUserModels(): Promise<{
   success: boolean
   message?: string
