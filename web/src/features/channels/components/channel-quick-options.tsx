@@ -31,7 +31,7 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 
-import { CHANNEL_TYPE_TASK_PLUGIN, MODEL_FETCHABLE_TYPES } from '../constants'
+import { CHANNEL_TYPE_TASK_PLUGIN } from '../constants'
 import type { ChannelFormValues } from '../lib/channel-form'
 import {
   getHeaderPassthroughState,
@@ -73,22 +73,19 @@ export function ChannelQuickOptions(props: ChannelQuickOptionsProps) {
   const id = useId()
   const formContext = useFormContext<ChannelFormValues>()
   const form = props.form ?? formContext
-  const [passthrough, headerOverride, autoBan, modelCheck, websocket] =
-    useWatch({
-      control: form.control,
-      name: [
-        'pass_through_body_enabled',
-        'header_override',
-        'auto_ban',
-        'upstream_model_update_check_enabled',
-        'responses_websocket_enabled',
-      ],
-    })
+  const [passthrough, headerOverride, autoBan, websocket] = useWatch({
+    control: form.control,
+    name: [
+      'pass_through_body_enabled',
+      'header_override',
+      'auto_ban',
+      'responses_websocket_enabled',
+    ],
+  })
   const sensitiveDisabled = props.sensitiveLocked || props.disabled
   const setOption = (
     name:
       | 'pass_through_body_enabled'
-      | 'upstream_model_update_check_enabled'
       | 'responses_websocket_enabled',
     value: boolean
   ) => form.setValue(name, value, { shouldDirty: true, shouldValidate: true })
@@ -156,17 +153,6 @@ export function ChannelQuickOptions(props: ChannelQuickOptionsProps) {
       }),
     disabled: props.disabled,
   })
-  if (MODEL_FETCHABLE_TYPES.has(props.channelType)) {
-    options.push({
-      key: 'model-check',
-      label: t('Detect model updates'),
-      description: t('Check for new upstream models'),
-      checked: modelCheck === true,
-      onCheckedChange: (value) =>
-        setOption('upstream_model_update_check_enabled', value),
-      disabled: sensitiveDisabled,
-    })
-  }
   if (supportsResponsesWebSocket(props.channelType)) {
     options.push({
       key: 'websocket',

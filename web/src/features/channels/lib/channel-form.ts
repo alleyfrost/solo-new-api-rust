@@ -28,14 +28,12 @@ import {
   CHANNEL_STATUS,
   ERROR_MESSAGES,
   FIELD_PASSTHROUGH_TYPES,
-  MODEL_FETCHABLE_TYPES,
   OPENAI_FIELD_PASSTHROUGH_TYPES,
 } from '../constants'
 import type { Channel } from '../types'
 import {
   CHANNEL_TYPE_ADVANCED_CUSTOM,
   advancedCustomConfigUsesRelativeUpstreamPath,
-  hasValidAdvancedCustomModelListRoute,
   parseAdvancedCustomConfig,
   stringifyAdvancedCustomConfig,
   validateAdvancedCustomConfig,
@@ -292,10 +290,6 @@ export const channelFormSchema = z
     claude_beta_query: z.boolean().optional(), // Anthropic: beta query passthrough
     ollama_openai_chat: z.boolean().optional(), // Ollama: OpenAI-compatible /v1/chat/completions instead of native /api/chat
     disable_task_polling_sleep: z.boolean().optional(),
-    // Upstream model update settings (stored in settings JSON)
-    upstream_model_update_check_enabled: z.boolean().optional(),
-    upstream_model_update_auto_sync_enabled: z.boolean().optional(),
-    upstream_model_update_ignored_models: z.string().optional(),
   })
   .superRefine((data, ctx) => {
     if (
@@ -341,16 +335,6 @@ export const channelFormSchema = z
           ctx,
           'base_url',
           'Base URL is required when an advanced route uses an upstream path'
-        )
-      }
-      if (
-        data.upstream_model_update_check_enabled === true &&
-        !hasValidAdvancedCustomModelListRoute(advancedCustomConfig)
-      ) {
-        addRequiredIssue(
-          ctx,
-          'upstream_model_update_check_enabled',
-          'OpenAI Models route is required to enable upstream model checks'
         )
       }
     }
@@ -487,9 +471,6 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   claude_beta_query: false,
   ollama_openai_chat: false,
   disable_task_polling_sleep: false,
-  upstream_model_update_check_enabled: false,
-  upstream_model_update_auto_sync_enabled: false,
-  upstream_model_update_ignored_models: '',
   advanced_custom: '',
 }
 
@@ -564,9 +545,6 @@ export function transformChannelToFormDefaults(
   let claudeBetaQuery = false
   let ollamaOpenAIChat = false
   let disableTaskPollingSleep = false
-  let upstreamModelUpdateCheckEnabled = false
-  let upstreamModelUpdateAutoSyncEnabled = false
-  let upstreamModelUpdateIgnoredModels = ''
   let advancedCustom = ''
 
   if (channel.settings) {
@@ -589,15 +567,6 @@ export function transformChannelToFormDefaults(
       claudeBetaQuery = parsed.claude_beta_query === true
       ollamaOpenAIChat = parsed.ollama_openai_chat === true
       disableTaskPollingSleep = parsed.disable_task_polling_sleep === true
-      upstreamModelUpdateCheckEnabled =
-        parsed.upstream_model_update_check_enabled === true
-      upstreamModelUpdateAutoSyncEnabled =
-        parsed.upstream_model_update_auto_sync_enabled === true
-      upstreamModelUpdateIgnoredModels = Array.isArray(
-        parsed.upstream_model_update_ignored_models
-      )
-        ? parsed.upstream_model_update_ignored_models.join(',')
-        : ''
       if (parsed.advanced_custom) {
         advancedCustom = stringifyAdvancedCustomConfig(parsed.advanced_custom)
       }
@@ -652,9 +621,6 @@ export function transformChannelToFormDefaults(
     ollama_openai_chat: ollamaOpenAIChat,
     disable_task_polling_sleep: disableTaskPollingSleep,
     allow_safety_identifier: allowSafetyIdentifier,
-    upstream_model_update_check_enabled: upstreamModelUpdateCheckEnabled,
-    upstream_model_update_auto_sync_enabled: upstreamModelUpdateAutoSyncEnabled,
-    upstream_model_update_ignored_models: upstreamModelUpdateIgnoredModels,
     advanced_custom: advancedCustom,
   }
 }
@@ -817,32 +783,6 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
 
   settingsObj.disable_task_polling_sleep =
     formData.disable_task_polling_sleep === true
-
-  // Upstream model update settings (for model-fetchable channel types)
-  if (MODEL_FETCHABLE_TYPES.has(formData.type)) {
-    settingsObj.upstream_model_update_check_enabled =
-      formData.upstream_model_update_check_enabled === true
-    settingsObj.upstream_model_update_auto_sync_enabled =
-      settingsObj.upstream_model_update_check_enabled === true &&
-      formData.upstream_model_update_auto_sync_enabled === true
-    settingsObj.upstream_model_update_ignored_models = [
-      ...new Set(
-        String(formData.upstream_model_update_ignored_models || '')
-          .split(',')
-          .map((model) => model.trim())
-          .filter(Boolean)
-      ),
-    ]
-    if (
-      !Array.isArray(settingsObj.upstream_model_update_last_detected_models) ||
-      settingsObj.upstream_model_update_check_enabled !== true
-    ) {
-      settingsObj.upstream_model_update_last_detected_models = []
-    }
-    if (typeof settingsObj.upstream_model_update_last_check_time !== 'number') {
-      settingsObj.upstream_model_update_last_check_time = 0
-    }
-  }
 
   if (formData.type === CHANNEL_TYPE_ADVANCED_CUSTOM) {
     const advancedCustomConfig = parseAdvancedCustomConfig(

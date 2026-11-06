@@ -1145,6 +1145,8 @@ test('quick options and detailed settings share changes across tabs and save the
     pass_through_body_enabled: true,
     responses_websocket_enabled: true,
   })
+  // Keys left by the removed upstream model sync feature must survive a save
+  // untouched (channels.settings is preserved verbatim).
   editingChannel.settings = JSON.stringify({
     upstream_model_update_check_enabled: true,
     upstream_model_update_auto_sync_enabled: true,
@@ -1159,7 +1161,6 @@ test('quick options and detailed settings share changes across tabs and save the
   const quick = within(screen.getByRole('group', { name: 'Quick options' }))
   for (const name of [
     'Pass Through Body',
-    'Detect model updates',
     'Responses WebSocket',
   ]) {
     const toggle = quick.getByRole('switch', { name })
@@ -1187,27 +1188,11 @@ test('quick options and detailed settings share changes across tabs and save the
     screen.getByRole('switch', { name: 'Allow service_tier passthrough' })
   ).toBeVisible()
 
-  await user.click(screen.getByRole('tab', { name: /Other Settings/ }))
-  const modelCheck = screen.getByRole('switch', {
-    name: 'Upstream Model Update Check',
-  })
-  expect(modelCheck).not.toBeChecked()
-  expect(
-    screen.getByRole('switch', { name: 'Auto Sync Upstream Models' })
-  ).toHaveAttribute('aria-disabled', 'true')
-  await user.click(modelCheck)
-  expect(
-    screen.getByRole('switch', { name: 'Auto Sync Upstream Models' })
-  ).toBeChecked()
-
   await user.click(screen.getByRole('tab', { name: /Routing & Mapping/ }))
   expect(screen.getByRole('switch', { name: 'Auto Ban' })).toBeChecked()
   await user.click(screen.getByRole('switch', { name: 'Auto Ban' }))
   await user.click(screen.getByRole('tab', { name: /Connection & Models/ }))
   expect(quick.getByRole('switch', { name: 'Pass Through Body' })).toBeChecked()
-  expect(
-    quick.getByRole('switch', { name: 'Detect model updates' })
-  ).toBeChecked()
   expect(
     quick.getByRole('switch', { name: 'Auto-disable channel' })
   ).not.toBeChecked()
@@ -1226,6 +1211,7 @@ test('quick options and detailed settings share changes across tabs and save the
     pass_through_body_enabled: true,
     responses_websocket_enabled: false,
   })
+  // The form no longer knows these keys; a save must leave them untouched.
   expect(JSON.parse(payload.settings)).toMatchObject({
     upstream_model_update_check_enabled: true,
     upstream_model_update_auto_sync_enabled: true,
@@ -1333,7 +1319,7 @@ test('quick options show only applicable shortcuts when the provider changes', a
   render(<ConfigurationHarness />)
   await user.click(screen.getByRole('option', { name: 'OpenAI Built-in #1' }))
   let quick = within(screen.getByRole('group', { name: 'Quick options' }))
-  expect(quick.getAllByRole('switch')).toHaveLength(5)
+  expect(quick.getAllByRole('switch')).toHaveLength(4)
   expect(
     quick.queryByRole('switch', { name: 'Force Format' })
   ).not.toBeInTheDocument()
@@ -1351,7 +1337,7 @@ test('quick options show only applicable shortcuts when the provider changes', a
   await user.click(screen.getByRole('button', { name: 'Change provider' }))
   await user.click(screen.getByRole('option', { name: /^DeepSeek / }))
   quick = within(screen.getByRole('group', { name: 'Quick options' }))
-  expect(quick.getAllByRole('switch')).toHaveLength(4)
+  expect(quick.getAllByRole('switch')).toHaveLength(3)
   expect(
     quick.queryByRole('switch', { name: 'Responses WebSocket' })
   ).not.toBeInTheDocument()
@@ -1660,7 +1646,7 @@ test('configuration from fields unsupported by the selected provider stays unmar
     setting:
       '{"task_plugin_key":"video-a","force_format":true,"responses_websocket_enabled":true}',
     settings:
-      '{"allow_speed":true,"allow_service_tier":true,"upstream_model_update_check_enabled":true,"ollama_openai_chat":true}',
+      '{"allow_speed":true,"allow_service_tier":true,"ollama_openai_chat":true}',
   }
   render(<ConfigurationHarness currentRow={editingChannel} />)
   await screen.findByDisplayValue('Existing channel')
@@ -2113,7 +2099,6 @@ test('an operator without sensitive write permission can discover saved models a
   const quick = within(screen.getByRole('group', { name: 'Quick options' }))
   for (const name of [
     'Pass Through Body',
-    'Detect model updates',
     'Responses WebSocket',
   ]) {
     const toggle = quick.getByRole('switch', { name })
@@ -2769,7 +2754,7 @@ test('on wide screens the quick options move into the header as a compact toggle
   await screen.findByDisplayValue('Existing channel')
   const quick = screen.getByRole('group', { name: 'Quick options' })
   expect(quick.closest('[data-slot="sheet-header"]')).not.toBeNull()
-  expect(within(quick).getAllByRole('switch')).toHaveLength(5)
+  expect(within(quick).getAllByRole('switch')).toHaveLength(4)
   // Second header row: status badge and description on the left, toggles right.
   const statusRow = quick.parentElement
   if (!statusRow) throw new Error('status row missing')

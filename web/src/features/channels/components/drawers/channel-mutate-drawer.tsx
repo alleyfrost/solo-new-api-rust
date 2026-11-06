@@ -35,7 +35,6 @@ import {
   FileText,
   Eraser,
   Eye,
-  RefreshCw,
   Code,
   Route,
   Settings,
@@ -120,7 +119,6 @@ import { handleServerError } from '@/lib/handle-server-error'
 import { ROLE } from '@/lib/roles'
 import {
   requireServerSuccess,
-  createServerError,
   getServerErrorMessage,
 } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
@@ -133,7 +131,6 @@ import {
   getGroups,
   getPrefillGroups,
   getTaskPluginOptions,
-  refreshCodexCredential,
 } from '../../api'
 import {
   ADD_MODE_OPTIONS,
@@ -276,7 +273,6 @@ const MODEL_MAPPING_PREVIEW_FALLBACK: Array<{
 }> = [{ source: 'client-model', target: 'upstream-model' }]
 
 const ADVANCED_CUSTOM_ROUTE_TYPE_PREVIEW_LIMIT = 3
-const UPSTREAM_DETECTED_MODEL_PREVIEW_LIMIT = 8
 const SENSITIVE_FORM_FIELDS = [
   'type',
   'base_url',
@@ -315,31 +311,7 @@ const SENSITIVE_FORM_FIELDS = [
   'claude_beta_query',
   'ollama_openai_chat',
   'disable_task_polling_sleep',
-  'upstream_model_update_check_enabled',
-  'upstream_model_update_auto_sync_enabled',
-  'upstream_model_update_ignored_models',
 ] satisfies (keyof ChannelFormValues)[]
-
-function parseSettingsRecord(
-  settings: string | undefined
-): Record<string, unknown> {
-  if (!settings?.trim()) return {}
-  try {
-    const parsed = JSON.parse(settings)
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>
-    }
-  } catch {
-    return {}
-  }
-  return {}
-}
-
-function formatUnixTime(timestamp: unknown): string {
-  const seconds = Number(timestamp)
-  if (!Number.isFinite(seconds) || seconds <= 0) return '-'
-  return new Date(seconds * 1000).toLocaleString()
-}
 
 function channelConfigurationBlockClassName(
   status: ChannelConfigurationStatus,
@@ -427,8 +399,6 @@ export function ChannelMutateDrawer({
     ADMIN_PERMISSION_ACTIONS.BIND
   )
   const canRevealChannelKey = currentUser?.role === ROLE.SUPER_ADMIN
-  const [isCodexCredentialRefreshing, setIsCodexCredentialRefreshing] =
-    useState(false)
   const initialModelsRef = useRef<string[]>([])
   const initialModelMappingRef = useRef<string>('')
   const initialStatusCodeMappingRef = useRef<string>('')
@@ -600,9 +570,6 @@ export function ChannelMutateDrawer({
   const currentModelMapping = formValues.model_mapping
   const awsKeyType = formValues.aws_key_type
   const vertexKeyType = formValues.vertex_key_type
-  const upstreamModelUpdateCheckEnabled =
-    formValues.upstream_model_update_check_enabled
-  const currentSettings = formValues.settings
   const currentAdvancedCustom = formValues.advanced_custom
   const currentHeaderOverride = formValues.header_override
   const currentProxy = formValues.proxy
@@ -1001,30 +968,6 @@ export function ChannelMutateDrawer({
     t,
   ])
 
-  const upstreamUpdateMeta = useMemo(() => {
-    const settings = parseSettingsRecord(currentSettings)
-    const detectedModels = Array.isArray(
-      settings.upstream_model_update_last_detected_models
-    )
-      ? settings.upstream_model_update_last_detected_models
-          .map((model) => String(model || '').trim())
-          .filter(Boolean)
-      : []
-
-    return {
-      lastCheckTime: settings.upstream_model_update_last_check_time,
-      detectedModels: [...new Set(detectedModels)],
-    }
-  }, [currentSettings])
-
-  const upstreamDetectedModelsPreview = upstreamUpdateMeta.detectedModels.slice(
-    0,
-    UPSTREAM_DETECTED_MODEL_PREVIEW_LIMIT
-  )
-  const upstreamDetectedModelsOmittedCount =
-    upstreamUpdateMeta.detectedModels.length -
-    upstreamDetectedModelsPreview.length
-
   // Load channel data into form when editing
   useEffect(() => {
     if (!open) {
@@ -1163,25 +1106,6 @@ export function ChannelMutateDrawer({
       )
     }
   }
-
-  const handleRefreshCodexCredential = useCallback(async () => {
-    if (!channelId) return
-    setIsCodexCredentialRefreshing(true)
-    try {
-      const res = await refreshCodexCredential(channelId)
-      if (!res.success) {
-        throw createServerError(res, t('Failed to refresh credential'))
-      }
-      toast.success(t('Credential refreshed'))
-      queryClient.invalidateQueries({
-        queryKey: channelsQueryKeys.detail(channelId),
-      })
-    } catch (error) {
-      handleServerError(error, t('Refresh failed'))
-    } finally {
-      setIsCodexCredentialRefreshing(false)
-    }
-  }, [channelId, queryClient, t])
 
   // Unified function to update models
   const updateModels = useCallback(
@@ -2287,133 +2211,6 @@ export function ChannelMutateDrawer({
           </FormItem>
         )}
       />
-    </div>
-  )
-
-  const upstreamModelDetectionFields = MODEL_FETCHABLE_TYPES.has(
-    currentType
-  ) && (
-    <div
-      role='group'
-      aria-label={t('Upstream Model Detection Settings')}
-      className={channelConfigurationBlockClassName(
-        configuration.blocks.upstreamModelDetection,
-        'flex flex-col gap-4'
-      )}
-    >
-      <CardHeading
-        title={t('Upstream Model Detection Settings')}
-        status={configuration.blocks.upstreamModelDetection}
-        icon={<RefreshCw className='h-4 w-4' />}
-        iconTone='info'
-      />
-      <fieldset
-        disabled={sensitiveLocked}
-        className='space-y-4 disabled:opacity-60'
-      >
-        <div className='divide-border space-y-0 divide-y border-y'>
-          <FormField
-            control={form.control}
-            name='upstream_model_update_check_enabled'
-            render={({ field }) => (
-              <FormItem className='flex items-center justify-between px-4 py-3'>
-                <div className='space-y-0.5'>
-                  <FormLabel>{t('Upstream Model Update Check')}</FormLabel>
-                  <FormDescription>
-                    {t('Periodically check for upstream model changes')}
-                  </FormDescription>
-                  <FormMessage />
-                </div>
-                <FormControl>
-                  <Switch
-                    disabled={sensitiveLocked}
-                    checked={field.value}
-                    onCheckedChange={field.onChange}
-                  />
-                </FormControl>
-              </FormItem>
-            )}
-          />
-          <FormField
-            control={form.control}
-            name='upstream_model_update_auto_sync_enabled'
-            render={({ field }) => (
-              <FormItem className='flex items-center justify-between px-4 py-3'>
-                <div className='space-y-0.5'>
-                  <FormLabel>{t('Auto Sync Upstream Models')}</FormLabel>
-                  <FormDescription>
-                    {t(
-                      'Automatically sync model list when upstream changes are detected'
-                    )}
-                  </FormDescription>
-                </div>
-                <FormControl>
-                  <Switch
-                    checked={field.value}
-                    disabled={
-                      sensitiveLocked || !upstreamModelUpdateCheckEnabled
-                    }
-                    onCheckedChange={field.onChange}
-                  />
-                </FormControl>
-              </FormItem>
-            )}
-          />
-        </div>
-        <FormField
-          control={form.control}
-          name='upstream_model_update_ignored_models'
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>{t('Ignored upstream models')}</FormLabel>
-              <FormControl>
-                <Input
-                  placeholder={t(
-                    'e.g., gpt-4.1-nano,regex:^claude-.*$,regex:^sora-.*$'
-                  )}
-                  {...field}
-                />
-              </FormControl>
-              <FormDescription>
-                {t(
-                  'Comma-separated exact model names. Prefix with regex: to ignore by regular expression.'
-                )}
-              </FormDescription>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
-        <div className='text-muted-foreground space-y-2 border-t pt-3 text-xs'>
-          <div>
-            <span className='text-foreground font-medium'>
-              {t('Last check time')}:
-            </span>{' '}
-            {formatUnixTime(upstreamUpdateMeta.lastCheckTime)}
-          </div>
-          <div>
-            <span className='text-foreground font-medium'>
-              {t('Last detected addable models')}:
-            </span>{' '}
-            {upstreamUpdateMeta.detectedModels.length === 0 ? (
-              t('None')
-            ) : (
-              <>
-                <span className='break-all'>
-                  {upstreamDetectedModelsPreview.join(', ')}
-                </span>
-                {upstreamDetectedModelsOmittedCount > 0 && (
-                  <span className='ml-1'>
-                    {t('({{total}} total, {{omit}} omitted)', {
-                      total: upstreamUpdateMeta.detectedModels.length,
-                      omit: upstreamDetectedModelsOmittedCount,
-                    })}
-                  </span>
-                )}
-              </>
-            )}
-          </div>
-        </div>
-      </fieldset>
     </div>
   )
 
@@ -4542,47 +4339,6 @@ export function ChannelMutateDrawer({
                 }}
               />
 
-              {currentType === 57 && (
-                <div className='border-border/60 flex flex-col gap-3 border-y py-4'>
-                  <div className='flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>
-                    <div className='text-muted-foreground text-xs'>
-                      {t(
-                        'Codex channels use an OAuth JSON credential as the key.'
-                      )}
-                    </div>
-                    <div className='flex flex-wrap items-center gap-2'>
-                      {isEditing && channelId && (
-                        <Button
-                          type='button'
-                          variant='outline'
-                          size='sm'
-                          onClick={handleRefreshCodexCredential}
-                          disabled={
-                            sensitiveLocked || isCodexCredentialRefreshing
-                          }
-                        >
-                          {isCodexCredentialRefreshing ? (
-                            <Loader2 className='mr-2 h-4 w-4 animate-spin' />
-                          ) : (
-                            <RefreshCw className='mr-2 h-4 w-4' />
-                          )}
-                          {isCodexCredentialRefreshing
-                            ? t('Refreshing...')
-                            : t('Refresh credential')}
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                  <Alert className='border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-50'>
-                    <AlertDescription>
-                      {t(
-                        "Disclaimer: Personal use only. Do not distribute or share any credentials. This channel has prerequisites and requires prior setup; use it only if you understand the flow and risks, and comply with OpenAI's terms and policies. Credentials and configuration are for Codex CLI integration only, and are not intended for any other client, platform, or channel."
-                      )}
-                    </AlertDescription>
-                  </Alert>
-                </div>
-              )}
-
               {isEditing && isMultiKeyChannel && (
                 <FormField
                   control={form.control}
@@ -4814,7 +4570,6 @@ export function ChannelMutateDrawer({
                 {tlsInsecureSkipVerifyFields}
               </fieldset>
             </div>
-            {upstreamModelDetectionFields}
             {notesFields}
           </>
         }

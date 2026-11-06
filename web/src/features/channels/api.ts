@@ -88,31 +88,6 @@ export async function getTaskPluginOptions(): Promise<TaskPluginOption[]> {
   return requireServerSuccess(response.data).data
 }
 
-export type CodexUsageResponse = {
-  success: boolean
-  message?: string
-  upstream_status?: number
-  data?: Record<string, unknown>
-}
-
-export type CodexResetCreditsResponse = CodexUsageResponse
-
-export type CodexUsageResetResponse = CodexUsageResponse
-
-export type CodexCredentialRefreshResponse = {
-  success: boolean
-  message?: string
-  data?: {
-    expires_at?: string
-    last_refresh?: string
-    account_id?: string
-    email?: string
-    channel_id?: number
-    channel_type?: number
-    channel_name?: string
-  }
-}
-
 // ============================================================================
 // Base Channel CRUD Operations
 // ============================================================================
@@ -323,52 +298,6 @@ export async function getChannelKey(
       headers: { 'X-Security-Proof': proofToken },
       signal,
     })
-  )
-  return res.data
-}
-
-// ============================================================================
-// Codex Channel Operations
-// ============================================================================
-
-export async function refreshCodexCredential(
-  channelId: number
-): Promise<CodexCredentialRefreshResponse> {
-  const res = await api.post(
-    `/api/channel/${channelId}/codex/refresh`,
-    {},
-    channelActionConfig()
-  )
-  return res.data
-}
-
-export async function getCodexUsage(
-  channelId: number
-): Promise<CodexUsageResponse> {
-  const res = await api.get(
-    `/api/channel/${channelId}/codex/usage`,
-    channelActionConfig({ disableDuplicate: true })
-  )
-  return res.data
-}
-
-export async function getCodexResetCredits(
-  channelId: number
-): Promise<CodexResetCreditsResponse> {
-  const res = await api.get(
-    `/api/channel/${channelId}/codex/usage/reset-credits`,
-    channelActionConfig({ disableDuplicate: true })
-  )
-  return res.data
-}
-
-export async function resetCodexUsage(
-  channelId: number
-): Promise<CodexUsageResetResponse> {
-  const res = await api.post(
-    `/api/channel/${channelId}/codex/usage/reset`,
-    {},
-    channelActionConfig({ disableDuplicate: true })
   )
   return res.data
 }

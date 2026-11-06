@@ -21,7 +21,6 @@ import type { FieldErrors, FieldPath } from 'react-hook-form'
 import {
   CHANNEL_TYPE_OLLAMA,
   CLAUDE_FIELD_PASSTHROUGH_TYPES,
-  MODEL_FETCHABLE_TYPES,
   OPENAI_FIELD_PASSTHROUGH_TYPES,
 } from '../constants'
 import { CHANNEL_TYPE_ADVANCED_CUSTOM } from './advanced-custom'
@@ -86,14 +85,6 @@ const CONFIGURATION_BLOCKS = {
       'http2_connection_shards',
       'tls_insecure_skip_verify',
       'disable_task_polling_sleep',
-    ],
-  },
-  upstreamModelDetection: {
-    section: 'other',
-    fields: [
-      'upstream_model_update_check_enabled',
-      'upstream_model_update_auto_sync_enabled',
-      'upstream_model_update_ignored_models',
     ],
   },
   internalNotes: { section: 'other', fields: ['tag', 'remark'] },
@@ -179,13 +170,6 @@ export function getChannelConfigurationState(
       values.tls_insecure_skip_verify ||
       values.disable_task_polling_sleep
     ),
-    upstreamModelDetection:
-      MODEL_FETCHABLE_TYPES.has(values.type) &&
-      Boolean(
-        values.upstream_model_update_check_enabled ||
-        values.upstream_model_update_auto_sync_enabled ||
-        values.upstream_model_update_ignored_models?.trim()
-      ),
     internalNotes: Boolean(values.tag?.trim() || values.remark?.trim()),
   }
   const blocks = {} as Record<

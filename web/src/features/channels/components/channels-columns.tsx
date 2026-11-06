@@ -27,7 +27,7 @@ import {
   Shuffle,
   SlidersHorizontal,
 } from 'lucide-react'
-import { useState, useMemo, useEffect } from 'react'
+import { useMemo, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { BadgeListCell } from '@/components/data-table'
@@ -46,14 +46,9 @@ import {
 } from '@/components/ui/tooltip'
 import { toIntlLocale } from '@/i18n/languages'
 import { formatTimestampToDate } from '@/lib/format'
-import { handleServerError } from '@/lib/handle-server-error'
-import {
-  createServerError,
-  translateServerText,
-} from '@/lib/server-error-message'
+import { translateServerText } from '@/lib/server-error-message'
 import { truncateText } from '@/lib/utils'
 
-import { getCodexUsage } from '../api'
 import {
   CHANNEL_STATUS_CONFIG,
   CHANNEL_TYPE_TASK_PLUGIN,
@@ -77,10 +72,6 @@ import type { Channel } from '../types'
 import { TaskPluginChannelBadge } from './channel-type-badge'
 import { useChannels } from './channels-provider'
 import { DataTableRowActions } from './data-table-row-actions'
-import {
-  CodexUsageDialog,
-  type CodexUsageDialogData,
-} from './dialogs/codex-usage-dialog'
 import { NumericSpinnerInput } from './numeric-spinner-input'
 
 function parseIonetMeta(otherInfo: string | null | undefined): null | {
@@ -170,95 +161,6 @@ function WeightCell({ channel }: { channel: Channel }) {
 }
 
 const SENSITIVE_MASK = '••••'
-
-/**
- * Account info cell: Codex (type 57) channels open their usage dialog;
- * other rows render a dash.
- */
-export function ChannelAccountCell({ channel }: { channel: Channel }) {
-  const { t } = useTranslation()
-  const { sensitiveVisible } = useChannels()
-  const [isUpdating, setIsUpdating] = useState(false)
-  const [codexUsageOpen, setCodexUsageOpen] = useState(false)
-  const [codexUsageResponse, setCodexUsageResponse] =
-    useState<CodexUsageDialogData | null>(null)
-
-  const fetchCodexUsage = async () => {
-    if (isUpdating) {
-      return
-    }
-    setIsUpdating(true)
-    try {
-      const res = await getCodexUsage(channel.id)
-      if (!res.success) {
-        throw createServerError(res, t('Failed to fetch usage'))
-      }
-      setCodexUsageResponse(res)
-      setCodexUsageOpen(true)
-    } catch (error) {
-      handleServerError(error, t('Failed to fetch usage'))
-    } finally {
-      setIsUpdating(false)
-    }
-  }
-
-  if (isTagAggregateRow(channel)) {
-    return <span className='text-muted-foreground text-xs'>-</span>
-  }
-
-  if (channel.type === 57) {
-    let codexBadgeLabel: string = SENSITIVE_MASK
-    if (isUpdating) {
-      codexBadgeLabel = t('Updating...')
-    } else if (sensitiveVisible) {
-      codexBadgeLabel = t('Account Info')
-    }
-
-    return (
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                variant='ghost'
-                size='sm'
-                className='-ml-1.5 h-auto rounded-full p-0'
-                aria-haspopup='dialog'
-                onClick={fetchCodexUsage}
-              />
-            }
-          >
-            <StatusBadge
-              label={codexBadgeLabel}
-              variant='info'
-              size='sm'
-              copyable={false}
-              showDot={false}
-              className='cursor-pointer'
-            />
-          </TooltipTrigger>
-          <TooltipContent side='top'>
-            <p>{t('Click to view Codex usage')}</p>
-          </TooltipContent>
-        </Tooltip>
-
-        <CodexUsageDialog
-          open={codexUsageOpen}
-          onOpenChange={setCodexUsageOpen}
-          channelName={channel.name}
-          channelId={channel.id}
-          channelDisplayName={sensitiveVisible ? undefined : SENSITIVE_MASK}
-          channelDisplayId={sensitiveVisible ? undefined : SENSITIVE_MASK}
-          response={codexUsageResponse}
-          onRefresh={fetchCodexUsage}
-          isRefreshing={isUpdating}
-        />
-      </TooltipProvider>
-    )
-  }
-
-  return <span className='text-muted-foreground text-xs'>-</span>
-}
 
 /**
  * Generate channels columns configuration
@@ -814,14 +716,6 @@ export function useChannelsColumns(
         cell: ({ row }) => <WeightCell channel={row.original} />,
         size: 90,
         enableSorting: false,
-      },
-
-      // Account info column (inference status / Codex usage)
-      {
-        id: 'account',
-        header: t('Account Info'),
-        cell: ({ row }) => <ChannelAccountCell channel={row.original} />,
-        size: 120,
       },
 
       // Response Time column

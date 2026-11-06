@@ -36,8 +36,8 @@ const SENSITIVE_MASK = '••••'
  * renderer via `flexRender`, so the table's information and interactions are
  * preserved: row selection, provider/multi-key/IO.NET type badge, id,
  * name/remark + warning icons, status (with tooltips), groups, inline
- * priority/weight spinners, account info (inference/Codex status), response
- * and test times, tag expand-collapse, and the per-row actions menu.
+ * priority/weight spinners, response and test times, tag expand-collapse,
+ * and the per-row actions menu.
  */
 function ChannelCardComponent({
   row,
@@ -71,7 +71,6 @@ function ChannelCardComponent({
   const actionsCell = renderCell('actions')
   const priorityCell = renderCell('priority')
   const weightCell = renderCell('weight')
-  const accountCell = renderCell('account')
   const responseCell = renderCell('response_time')
   const testCell = renderCell('test_time')
 
@@ -106,7 +105,7 @@ function ChannelCardComponent({
           </div>
         </div>
 
-        {/* Both rows share their columns: identity/account on the left,
+        {/* Both rows share their columns: identity on the left,
           priority/response and weight/last tested on the right. */}
         <StatusBadgeTypeContext.Provider value='text'>
           <div className='grid grid-cols-[minmax(0,1fr)_auto_auto] items-start gap-3'>
@@ -129,15 +128,7 @@ function ChannelCardComponent({
               <span className={labelClass}>{t('Weight')}</span>
               {weightCell}
             </div>
-            <dl className='col-span-3 grid grid-cols-subgrid gap-y-1'>
-              <div className='row-span-2 grid min-w-0 grid-rows-subgrid'>
-                <dt className={labelClass}>{t('Account Info')}</dt>
-                <dd className='min-w-0 text-sm tabular-nums [&_[data-slot=status-badge]]:!ml-0 [&>div]:ml-0 [&>div]:flex-wrap [&>div]:gap-x-3'>
-                  {accountCell ?? (
-                    <span className='text-muted-foreground'>-</span>
-                  )}
-                </dd>
-              </div>
+            <dl className='col-span-2 col-start-2 grid grid-cols-subgrid gap-y-1'>
               <div className='row-span-2 grid min-w-0 grid-rows-subgrid'>
                 <dt className={labelClass}>{t('Response')}</dt>
                 <dd className='min-w-0 text-sm tabular-nums [&_[data-slot=status-badge]]:!ml-0'>
