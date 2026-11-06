@@ -162,14 +162,13 @@ pub async fn self_groups(State(state): State<AppState>) -> Response {
             .await
             .unwrap_or_default();
     let mut data = serde_json::Map::new();
+    // 只记用量不记金额：本部署不套用任何分组倍率，所以不返回 ratio，
+    // 否则前端会把它渲染成一个并不存在的计价倍数。
     for (group,) in groups {
-        data.insert(group, serde_json::json!({ "desc": "", "ratio": 1 }));
+        data.insert(group, serde_json::json!({ "desc": "" }));
     }
     if data.is_empty() {
-        data.insert(
-            "default".into(),
-            serde_json::json!({ "desc": "", "ratio": 1 }),
-        );
+        data.insert("default".into(), serde_json::json!({ "desc": "" }));
     }
     json_ok(&serde_json::Value::Object(data))
 }

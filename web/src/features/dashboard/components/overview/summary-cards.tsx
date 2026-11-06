@@ -26,11 +26,11 @@ import { getUserQuotaDates } from '@/features/dashboard/api'
 import { safeDivide } from '@/features/dashboard/lib'
 import { useSummaryCardsConfig } from '@/features/dashboard/hooks/use-dashboard-config'
 import type { QuotaDataItem } from '@/features/dashboard/types'
+import { getUserProfile } from '@/features/profile/api'
 import { useStatus } from '@/hooks/use-status'
 import { formatNumber } from '@/lib/format'
 import { requireServerSuccess } from '@/lib/server-error-message'
 import { computeTimeRange } from '@/lib/time'
-import { useAuthStore } from '@/stores/auth-store'
 
 import { StatCard } from '../ui/stat-card'
 
@@ -89,11 +89,17 @@ function getSummarySparkline(
 
 export function SummaryCards() {
   const { t } = useTranslation()
-  const user = useAuthStore((state) => state.auth.user)
   const { loading } = useStatus()
 
   const summaryTimeRange = useMemo(() => computeTimeRange(1), [])
-  const requestCount = Number(user?.request_count ?? 0)
+  // Lifetime requests come from the log aggregation the profile endpoint
+  // exposes; the session payload carries no usage counters.
+  const lifetimeQuery = useQuery({
+    queryKey: ['dashboard', 'overview', 'lifetime-requests'],
+    queryFn: async () => requireServerSuccess(await getUserProfile()),
+    staleTime: 60 * 1000,
+  })
+  const requestCount = Number(lifetimeQuery.data?.data?.request_count ?? 0)
 
   const usageTrendQuery = useQuery({
     queryKey: [

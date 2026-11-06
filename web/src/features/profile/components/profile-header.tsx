@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Activity, BarChart3, WalletCards } from 'lucide-react'
+import { Activity, ArrowDownToLine, BarChart3 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { StatusBadge } from '@/components/status-badge'
@@ -88,7 +88,7 @@ export function ProfileHeader({ profile, loading }: ProfileHeaderProps) {
     label: string
     value: string
     description: string
-    icon: typeof WalletCards
+    icon: typeof ArrowDownToLine
     tone: IconBadgeTone
   }[] = [
     {
@@ -102,7 +102,7 @@ export function ProfileHeader({ profile, loading }: ProfileHeaderProps) {
       label: t('Input Tokens'),
       value: formatCompactNumber(profile.prompt_tokens),
       description: t('Prompt tokens consumed'),
-      icon: WalletCards,
+      icon: ArrowDownToLine,
       tone: 'success',
     },
     {
