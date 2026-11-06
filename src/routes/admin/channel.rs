@@ -87,6 +87,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/channel/models", get(all_models))
         .route("/api/channel/models_enabled", get(enabled_models))
         .route("/api/channel/default_base_urls", get(default_base_urls))
+        .route("/api/channel/ops", get(ops))
         .route("/api/channel/priority/order", get(priority_order))
         .route("/api/channel/batch", post(batch_delete))
         .route("/api/channel/status/batch", post(batch_status))
@@ -662,6 +663,19 @@ pub async fn enabled_models(
     .await
     .map_err(internal)?;
     Ok(json_ok(&rows))
+}
+
+pub async fn ops(
+    State(state): State<AppState>,
+) -> Result<axum::response::Response, ApiError> {
+    let retry: Option<String> = sqlx::query_scalar("SELECT value FROM options WHERE `key`='RetryTimes'")
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(internal)?;
+    Ok(json_ok(&json!({
+        "retry_times": retry.and_then(|v| v.parse::<i64>().ok()).unwrap_or(3),
+        "request_policy": {"automatic_disable": true, "source": "system"}
+    })))
 }
 
 pub async fn default_base_urls() -> axum::response::Response {

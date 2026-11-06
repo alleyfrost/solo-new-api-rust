@@ -1,15 +1,44 @@
 use std::path::PathBuf;
 
+use axum::body::Body;
+use axum::extract::Request;
 use axum::Router;
+use axum::http::{Method, StatusCode};
+use axum::response::{IntoResponse, Response};
+use serde_json::json;
+use tower::ServiceExt;
 use tower_http::services::{ServeDir, ServeFile};
 
-/// Serves the built frontend from `dist`, falling back to `index.html` so that
-/// client-side routes (e.g. `/keys`) load the SPA shell.
-///
-/// Uses `fallback` rather than `not_found_service`: the latter forces the
-/// fallback's status to 404, which would break SPA deep links routed by axum's
-/// own `fallback_service`.
+/// Router whose fallback serves the frontend; merge or mount it at the root.
 pub fn spa_service(dist: PathBuf) -> Router {
+    Router::new().fallback(move |req| {
+        let dist = dist.clone();
+        async move { serve(dist, req).await }
+    })
+}
+
+/// Serves the built frontend from `dist`, falling back to `index.html` for SPA
+/// client routes. Unknown `/api`, `/v1`, `/mj` and `/pg` paths return JSON 404
+/// instead of the SPA shell, otherwise clients would parse HTML as JSON.
+pub async fn serve(dist: PathBuf, req: Request) -> Response {
+    let path = req.uri().path();
+    if ["/api", "/v1", "/mj", "/pg"]
+        .iter()
+        .any(|prefix| path == *prefix || path.starts_with(&format!("{prefix}/")))
+    {
+        return (
+            StatusCode::NOT_FOUND,
+            axum::Json(json!({ "success": false, "message": "not found" })),
+        )
+            .into_response();
+    }
+    if req.method() != Method::GET && req.method() != Method::HEAD {
+        return StatusCode::METHOD_NOT_ALLOWED.into_response();
+    }
     let index = dist.join("index.html");
-    Router::new().fallback_service(ServeDir::new(dist).fallback(ServeFile::new(index)))
+    let service = ServeDir::new(dist).fallback(ServeFile::new(index));
+    match service.oneshot(req).await {
+        Ok(res) => res.map(Body::new).into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
 }

@@ -1,6 +1,6 @@
+use axum::Router;
 use axum::body::Body;
 use axum::http::Request;
-use axum::Router;
 use http_body_util::BodyExt;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
@@ -13,8 +13,14 @@ async fn setup() -> (Router, SqlitePool, AppState) {
     sqlx::query("CREATE TABLE tokens (id INTEGER PRIMARY KEY, user_id INTEGER, `key` TEXT, status INTEGER, name TEXT, created_time INTEGER, accessed_time INTEGER, expired_time INTEGER, remain_quota INTEGER, unlimited_quota INTEGER, model_limits_enabled INTEGER, model_limits TEXT, allow_ips TEXT, `group` TEXT, auto_groups TEXT, cross_group_retry INTEGER, used_quota INTEGER, allow_user_quota_query INTEGER, deleted_at TEXT)").execute(&pool).await.unwrap();
     sqlx::query("CREATE TABLE channels (id INTEGER PRIMARY KEY AUTOINCREMENT, type INTEGER, `key` TEXT, status INTEGER, name TEXT, models TEXT, `group` TEXT, base_url TEXT, priority INTEGER, weight INTEGER, channel_info TEXT, model_mapping TEXT, header_override TEXT, created_time INTEGER, test_time INTEGER, response_time INTEGER, open_ai_organization TEXT, test_model TEXT, other TEXT, balance REAL, balance_updated_time INTEGER, used_quota INTEGER, status_code_mapping TEXT, auto_ban INTEGER, other_info TEXT, tag TEXT, setting TEXT, param_override TEXT, remark TEXT, settings TEXT)").execute(&pool).await.unwrap();
     sqlx::query("CREATE TABLE abilities (`group` TEXT, model TEXT, channel_id INTEGER, enabled INTEGER, priority INTEGER, weight INTEGER, tag TEXT, PRIMARY KEY (`group`, model, channel_id))").execute(&pool).await.unwrap();
-    sqlx::query("CREATE TABLE options (`key` TEXT PRIMARY KEY, value TEXT)").execute(&pool).await.unwrap();
-    sqlx::query("INSERT INTO users VALUES (1,'root','x',NULL,100,1,'default',1,NULL,NULL)").execute(&pool).await.unwrap();
+    sqlx::query("CREATE TABLE options (`key` TEXT PRIMARY KEY, value TEXT)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO users VALUES (1,'root','x',NULL,100,1,'default',1,NULL,NULL)")
+        .execute(&pool)
+        .await
+        .unwrap();
 
     let caches = Caches::load(&pool).await.unwrap();
     let cfg = solo_new_api_rust::config::Config {
@@ -30,7 +36,12 @@ async fn setup() -> (Router, SqlitePool, AppState) {
     (app, pool, state)
 }
 
-async fn call(app: &Router, method: &str, uri: &str, body: Option<serde_json::Value>) -> (u16, serde_json::Value) {
+async fn call(
+    app: &Router,
+    method: &str,
+    uri: &str,
+    body: Option<serde_json::Value>,
+) -> (u16, serde_json::Value) {
     let mut builder = Request::builder().method(method).uri(uri);
     let body = match body {
         Some(value) => {
@@ -39,10 +50,17 @@ async fn call(app: &Router, method: &str, uri: &str, body: Option<serde_json::Va
         }
         None => Body::empty(),
     };
-    let res = app.clone().oneshot(builder.body(body).unwrap()).await.unwrap();
+    let res = app
+        .clone()
+        .oneshot(builder.body(body).unwrap())
+        .await
+        .unwrap();
     let status = res.status().as_u16();
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
-    (status, serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null))
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
+    )
 }
 
 #[tokio::test]
@@ -66,11 +84,12 @@ async fn channel_crud_rebuilds_abilities_and_caches() {
     assert_eq!(status, 200, "{body}");
     let id = body["data"][0].as_i64().unwrap();
 
-    let abilities: (i64, i64) = sqlx::query_as("SELECT COUNT(*), SUM(enabled) FROM abilities WHERE channel_id=?")
-        .bind(id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let abilities: (i64, i64) =
+        sqlx::query_as("SELECT COUNT(*), SUM(enabled) FROM abilities WHERE channel_id=?")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(abilities, (4, 4));
     assert_eq!(state.caches.read().unwrap().channels[&id].name, "c1");
 
@@ -127,7 +146,13 @@ async fn channel_crud_rebuilds_abilities_and_caches() {
     let (_, enabled_models) = call(&app, "GET", "/api/channel/models_enabled", None).await;
     assert_eq!(enabled_models["data"].as_array().unwrap().len(), 0);
     let (_, models) = call(&app, "GET", "/api/channel/models", None).await;
-    assert!(models["data"].as_array().unwrap().iter().any(|m| m["id"] == "m2"));
+    assert!(
+        models["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["id"] == "m2")
+    );
 
     let (status, _) = call(&app, "DELETE", &format!("/api/channel/{id}"), None).await;
     assert_eq!(status, 200);
@@ -168,4 +193,22 @@ async fn multi_key_channel_keeps_newline_keys() {
     let info: serde_json::Value = serde_json::from_str(&info).unwrap();
     assert_eq!(info["is_multi_key"], true);
     assert_eq!(info["multi_key_size"], 2);
+}
+
+#[tokio::test]
+async fn group_list_returns_group_names() {
+    let (_, _pool, state) = setup().await;
+    sqlx::query("INSERT INTO abilities VALUES ('default','m1',1,1,0,0,'')")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO abilities VALUES ('vip','m1',1,1,0,0,'')")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    let app = solo_new_api_rust::routes::public_router().with_state(state);
+    let (status, body) = call(&app, "GET", "/api/group/", None).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["success"], true);
+    assert_eq!(body["data"], serde_json::json!(["default", "vip"]));
 }
