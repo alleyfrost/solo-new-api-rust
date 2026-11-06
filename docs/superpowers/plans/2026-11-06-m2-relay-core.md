@@ -720,3 +720,523 @@ Expected: 全绿。
 git add src tests
 git commit -m "feat(m2): async batch log writer"
 ```
+
+---
+
+## Task 5: `/v1/chat/completions` 流式/非流式转发
+
+**Files:**
+- Create: `src/relay/mod.rs`、`src/relay/chat.rs`
+- Modify: `src/lib.rs`、`src/main.rs`、`src/model.rs`、`src/state.rs`、`src/logging.rs`、`src/auth/token.rs`、`tests/routing.rs`、`tests/models_endpoint.rs`、`tests/log_writer.rs`、`Cargo.toml`
+- Test: `tests/relay_helpers.rs`
+
+**Interfaces:**
+- Produces:
+  - `relay::Usage { prompt_tokens: i64, completion_tokens: i64 }`、`relay::usage_from_json(&Value) -> Option<Usage>`
+  - `relay::map_model(origin: &str, mapping: Option<&str>) -> String`（链式映射、循环保护）
+  - `relay::SseTap::new(wants_usage: bool)`、`feed(&mut self, &[u8]) -> Vec<u8>`、`finish(&mut self) -> Vec<u8>`、`usage() -> Usage`
+  - `relay::client_ip(&HeaderMap, trust_proxy: bool) -> String`
+  - `relay::openai_error(StatusCode, message, type) -> Response`
+  - `relay::chat::chat_completions(State, Extension<TokenContext>, HeaderMap, Bytes) -> Response`
+  - `TokenContext` 新增 `token_name: String`
+  - `ChannelRow` 新增 `model_mapping: Option<String>`、`header_override: Option<String>`
+  - 日志 writer 在同一事务内按 token 去重更新 `tokens.accessed_time`
+
+**核心约束：**
+- 流式响应逐事件转发，不缓存完整响应；单事件缓冲上限 1 MiB。
+- 流式请求默认向 OpenAI 兼容上游注入 `stream_options.include_usage=true`；若客户端未要求 usage，则丢弃“仅含 usage、choices 为空”的事件，保持客户端可见语义不变。
+- 只有响应尚未开始时才允许重试；成功响应开始后不得重试或改写。
+- 429/401/403 标记该 Key 不健康并立即切换；5xx/网络错误退避后重试；其它 4xx 直接返回。
+- 不写 `logs.quota`（固定 0），不改 token/user 额度，只更新 `accessed_time`。
+
+- [ ] **Step 1: 写失败测试 `tests/relay_helpers.rs`**
+
+```rust
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use solo_new_api_rust::relay::{Usage, SseTap, client_ip, map_model, usage_from_json};
+
+#[test]
+fn model_mapping_follows_chain_and_stops_cycles() {
+    assert_eq!(map_model("a", Some(r#"{"a":"b","b":"c"}"#)), "c");
+    assert_eq!(map_model("x", Some(r#"{"a":"b"}"#)), "x");
+    assert_eq!(map_model("a", Some(r#"{"a":"b","b":"a"}"#)), "a");
+    assert_eq!(map_model("a", None), "a");
+}
+
+#[test]
+fn usage_reads_openai_and_anthropic_names() {
+    let v: serde_json::Value = serde_json::from_str(r#"{"usage":{"prompt_tokens":3,"completion_tokens":4}}"#).unwrap();
+    assert_eq!(usage_from_json(&v), Some(Usage { prompt_tokens: 3, completion_tokens: 4 }));
+    let v: serde_json::Value = serde_json::from_str(r#"{"usage":{"input_tokens":5,"output_tokens":6}}"#).unwrap();
+    assert_eq!(usage_from_json(&v), Some(Usage { prompt_tokens: 5, completion_tokens: 6 }));
+    assert_eq!(usage_from_json(&serde_json::json!({"id":"x"})), None);
+}
+
+#[test]
+fn sse_tap_handles_split_chunks_and_drops_usage_only_event() {
+    let mut tap = SseTap::new(false);
+    let mut out = Vec::new();
+    out.extend(tap.feed(b"data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n"));
+    out.extend(tap.feed(b"data: {\"choices\":[],\"usa"));
+    out.extend(tap.feed(b"ge\":{\"prompt_tokens\":2,\"completion_tokens\":3}}\n\ndata: [DONE]\n\n"));
+    out.extend(tap.finish());
+    let text = String::from_utf8(out).unwrap();
+    assert!(text.contains("\"content\":\"hi\""));
+    assert!(!text.contains("prompt_tokens"), "客户端未要求 usage 时必须丢弃 usage-only 事件");
+    assert!(text.contains("[DONE]"));
+    assert_eq!(tap.usage(), Usage { prompt_tokens: 2, completion_tokens: 3 });
+}
+
+#[test]
+fn sse_tap_keeps_usage_when_requested() {
+    let mut tap = SseTap::new(true);
+    let out = tap.feed(b"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}\n\n");
+    assert!(String::from_utf8(out).unwrap().contains("prompt_tokens"));
+}
+
+#[test]
+fn client_ip_only_trusts_forwarded_headers_when_enabled() {
+    let mut h = HeaderMap::new();
+    h.insert("x-forwarded-for", HeaderValue::from_static("1.2.3.4, 5.6.7.8"));
+    assert_eq!(client_ip(&h, true), "1.2.3.4");
+    assert_eq!(client_ip(&h, false), "unknown");
+    let _ = StatusCode::OK;
+}
+```
+
+- [ ] **Step 2: 数据模型与依赖**
+
+- `Cargo.toml` 增加 `async-stream = "0.3"`、`tokio-stream = "0.1"`。
+- `ChannelRow` 增加两个可空字段；`Caches::load` 的 SELECT 增加 `model_mapping, header_override`。
+- 同步补 `tests/routing.rs`、`tests/models_endpoint.rs` 的 `ChannelRow` 字面量（字段填 `None`）。
+- `TokenContext` 增加 `token_name: String`，`validate_token` 填 `token.name.clone()`。
+
+- [ ] **Step 3: 实现 `src/relay/mod.rs`**
+
+```rust
+use std::collections::HashMap;
+
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
+use serde_json::{Value, json};
+
+const MAX_EVENT: usize = 1024 * 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Usage {
+    pub prompt_tokens: i64,
+    pub completion_tokens: i64,
+}
+
+fn as_i64(v: &Value) -> Option<i64> {
+    v.as_i64().or_else(|| v.as_u64().map(|n| n as i64))
+}
+
+pub fn usage_from_json(root: &Value) -> Option<Usage> {
+    let u = root.get("usage")?;
+    let prompt = u.get("prompt_tokens").and_then(as_i64)
+        .or_else(|| u.get("input_tokens").and_then(as_i64))?;
+    let completion = u.get("completion_tokens").and_then(as_i64)
+        .or_else(|| u.get("output_tokens").and_then(as_i64))
+        .unwrap_or(0);
+    Some(Usage { prompt_tokens: prompt, completion_tokens: completion })
+}
+
+pub fn map_model(origin: &str, mapping: Option<&str>) -> String {
+    let Some(map) = mapping
+        .filter(|m| !m.trim().is_empty())
+        .and_then(|m| serde_json::from_str::<HashMap<String, String>>(m).ok())
+    else {
+        return origin.to_string();
+    };
+    let mut current = origin.to_string();
+    let mut seen: Vec<String> = vec![current.clone()];
+    while let Some(next) = map.get(&current).filter(|m| !m.is_empty()) {
+        if seen.contains(next) {
+            return origin.to_string();
+        }
+        seen.push(next.clone());
+        current = next.clone();
+    }
+    current
+}
+
+pub fn client_ip(headers: &HeaderMap, trust_proxy: bool) -> String {
+    if !trust_proxy {
+        return "unknown".to_string();
+    }
+    headers.get("x-forwarded-for").and_then(|v| v.to_str().ok())
+        .and_then(|v| v.split(',').next()).map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .or_else(|| headers.get("x-real-ip").and_then(|v| v.to_str().ok()).map(|v| v.trim().to_string()))
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+pub fn openai_error(status: StatusCode, message: impl Into<String>, kind: &str) -> Response {
+    (status, axum::Json(json!({
+        "error": { "message": message.into(), "type": kind, "param": null, "code": null }
+    }))).into_response()
+}
+
+#[derive(Default)]
+struct BlockInfo {
+    usage: Option<Usage>,
+    usage_only: bool,
+}
+
+pub struct SseTap {
+    buf: Vec<u8>,
+    usage: Usage,
+    wants_usage: bool,
+}
+
+impl SseTap {
+    pub fn new(wants_usage: bool) -> Self {
+        Self { buf: Vec::new(), usage: Usage::default(), wants_usage }
+    }
+
+    pub fn usage(&self) -> Usage { self.usage }
+
+    fn inspect(block: &[u8]) -> BlockInfo {
+        let mut data: Vec<u8> = Vec::new();
+        for line in block.split(|&b| b == b'\n') {
+            let line = line.strip_suffix(b"\r").unwrap_or(line);
+            if let Some(rest) = line.strip_prefix(b"data:") {
+                let rest = rest.strip_prefix(b" ").unwrap_or(rest);
+                if !data.is_empty() { data.push(b'\n'); }
+                data.extend_from_slice(rest);
+            }
+        }
+        if data.is_empty() || data == b"[DONE]" { return BlockInfo::default(); }
+        let Ok(value) = serde_json::from_slice::<Value>(&data) else { return BlockInfo::default(); };
+        let usage = usage_from_json(&value);
+        let usage_only = usage.is_some()
+            && value.get("choices").and_then(Value::as_array).map(|a| a.is_empty()).unwrap_or(true);
+        BlockInfo { usage, usage_only }
+    }
+
+    pub fn feed(&mut self, chunk: &[u8]) -> Vec<u8> {
+        self.buf.extend_from_slice(chunk);
+        let mut out = Vec::new();
+        loop {
+            let Some((idx, sep)) = find_boundary(&self.buf) else {
+                if self.buf.len() > MAX_EVENT { out.append(&mut self.buf); }
+                break;
+            };
+            let block: Vec<u8> = self.buf.drain(..idx + sep).collect();
+            let info = Self::inspect(&block);
+            if let Some(u) = info.usage { self.usage = u; }
+            if info.usage_only && !self.wants_usage { continue; }
+            out.extend_from_slice(&block);
+        }
+        out
+    }
+
+    pub fn finish(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.buf)
+    }
+}
+
+fn find_boundary(buf: &[u8]) -> Option<(usize, usize)> {
+    let lf = buf.windows(2).position(|w| w == b"\n\n").map(|i| (i, 2));
+    let crlf = buf.windows(4).position(|w| w == b"\r\n\r\n").map(|i| (i, 4));
+    match (lf, crlf) {
+        (Some(a), Some(b)) => Some(if a.0 <= b.0 { a } else { b }),
+        (a, b) => a.or(b),
+    }
+}
+
+pub mod chat;
+```
+
+- [ ] **Step 4: 实现 `src/relay/chat.rs`**
+
+核心流程（完整实现）：
+
+```rust
+use std::collections::HashSet;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+use axum::body::{Body, Bytes};
+use axum::extract::{Extension, State};
+use axum::http::header::{CONTENT_TYPE, HeaderValue};
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::Response;
+use serde_json::{Value, json};
+use tokio_stream::StreamExt;
+
+use crate::auth::token::TokenContext;
+use crate::logging::{self, LogEntry};
+use crate::relay::{self, SseTap, Usage};
+use crate::{retry, routing, upstream};
+use crate::state::AppState;
+
+const PATH: &str = "/v1/chat/completions";
+
+struct LogMeta {
+    origin_model: String,
+    stream: bool,
+    channel_id: i64,
+    channel_name: String,
+    user_id: i64,
+    username: String,
+    token_id: i64,
+    token_name: String,
+    group: String,
+    ip: String,
+    request_id: String,
+    upstream_request_id: String,
+    started: Instant,
+}
+
+impl LogMeta {
+    fn entry(&self, usage: Usage) -> LogEntry {
+        LogEntry {
+            created_at: now(),
+            user_id: self.user_id,
+            username: self.username.clone(),
+            token_name: self.token_name.clone(),
+            model_name: self.origin_model.clone(),
+            prompt_tokens: usage.prompt_tokens,
+            completion_tokens: usage.completion_tokens,
+            use_time_secs: self.started.elapsed().as_secs() as i64,
+            is_stream: self.stream,
+            channel_id: self.channel_id,
+            channel_name: self.channel_name.clone(),
+            token_id: self.token_id,
+            group: self.group.clone(),
+            ip: self.ip.clone(),
+            request_id: self.request_id.clone(),
+            upstream_request_id: self.upstream_request_id.clone(),
+            other: "{}".to_string(),
+        }
+    }
+}
+
+fn now() -> i64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+}
+
+fn model_allowed(ctx: &TokenContext, model: &str) -> bool {
+    if !ctx.model_limits_enabled { return true; }
+    ctx.model_limits.split(',').map(str::trim).any(|m| m == model)
+}
+
+fn upstream_request_id(headers: &HeaderMap) -> String {
+    for name in ["x-request-id", "request-id", "x-oneapi-request-id", "x-upstream-request-id"] {
+        if let Some(v) = headers.get(name).and_then(|v| v.to_str().ok()) {
+            return v.to_string();
+        }
+    }
+    String::new()
+}
+
+fn response_with_ct(status: StatusCode, ct: Option<HeaderValue>, body: Body) -> Response {
+    let mut builder = Response::builder().status(status);
+    if let Some(ct) = ct { builder = builder.header(CONTENT_TYPE, ct); }
+    builder.body(body).unwrap_or_else(|_| {
+        relay::openai_error(StatusCode::INTERNAL_SERVER_ERROR, "response build failed", "internal_error")
+    })
+}
+
+fn upstream_error_response(status: StatusCode, bytes: &Bytes, ct: Option<HeaderValue>) -> Response {
+    let is_json = ct.as_ref().and_then(|v| v.to_str().ok()).map(|v| v.contains("json")).unwrap_or(false);
+    if is_json && !bytes.is_empty() {
+        return response_with_ct(status, ct, Body::from(bytes.clone()));
+    }
+    let text = String::from_utf8_lossy(&bytes[..bytes.len().min(2048)]).to_string();
+    relay::openai_error(status, format!("upstream error: {text}"), "upstream_error")
+}
+
+pub async fn chat_completions(
+    State(state): State<AppState>,
+    Extension(ctx): Extension<TokenContext>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let started = Instant::now();
+    let Ok(payload) = serde_json::from_slice::<Value>(&body) else {
+        return relay::openai_error(StatusCode::BAD_REQUEST, "invalid JSON body", "invalid_request_error");
+    };
+    if !payload.is_object() {
+        return relay::openai_error(StatusCode::BAD_REQUEST, "body must be a JSON object", "invalid_request_error");
+    }
+    let Some(origin_model) = payload.get("model").and_then(Value::as_str).map(str::to_string) else {
+        return relay::openai_error(StatusCode::BAD_REQUEST, "model is required", "invalid_request_error");
+    };
+    if !model_allowed(&ctx, &origin_model) {
+        return relay::openai_error(StatusCode::FORBIDDEN, format!("token has no access to model {origin_model}"), "permission_error");
+    }
+    let stream = payload.get("stream").and_then(Value::as_bool).unwrap_or(false);
+    let wants_usage = payload.pointer("/stream_options/include_usage").and_then(Value::as_bool).unwrap_or(false);
+
+    let (max_retry, group, username) = {
+        let caches = state.caches.read().expect("cache lock");
+        let max_retry = retry::max_retry_from_options(&caches.options);
+        let user = caches.users.get(&ctx.user_id).cloned();
+        let username = user.as_ref().map(|u| u.username.clone()).unwrap_or_default();
+        let group = if ctx.token_group.is_empty() || ctx.token_group == "auto" {
+            user.map(|u| u.group).unwrap_or_else(|| ctx.token_group.clone())
+        } else {
+            ctx.token_group.clone()
+        };
+        (max_retry, group, username)
+    };
+    let ip = relay::client_ip(&headers, state.config.trust_proxy_headers);
+    let request_id = format!("req_{}", uuid::Uuid::new_v4().simple());
+    let mut used: HashSet<(i64, usize)> = HashSet::new();
+    let mut last_error: Option<(StatusCode, Bytes, Option<HeaderValue>)> = None;
+
+    for attempt in 0..=max_retry {
+        let selected = {
+            let caches = state.caches.read().expect("cache lock");
+            routing::select_channel(&caches, &state.routing, &group, &origin_model, attempt, &used)
+        };
+        let Some(selected) = selected else { break; };
+        let channel = {
+            let caches = state.caches.read().expect("cache lock");
+            caches.channels.get(&selected.channel_id).cloned()
+        };
+        let Some(channel) = channel else { continue; };
+        used.insert((selected.channel_id, selected.key_index));
+
+        let mut attempt_payload = payload.clone();
+        let mapped = relay::map_model(&origin_model, channel.model_mapping.as_deref());
+        if mapped != origin_model {
+            attempt_payload["model"] = Value::String(mapped);
+        }
+        if stream && channel.r#type != 14 {
+            let obj = attempt_payload.as_object_mut().expect("object");
+            let options = obj.entry("stream_options".to_string()).or_insert_with(|| json!({}));
+            if !options.is_object() { *options = json!({}); }
+            options.as_object_mut().expect("object").insert("include_usage".to_string(), Value::Bool(true));
+        }
+        let upstream_body = match serde_json::to_vec(&attempt_payload) {
+            Ok(b) => b,
+            Err(e) => return relay::openai_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string(), "internal_error"),
+        };
+        let url = upstream::build_url(channel.base_url.as_deref().unwrap_or(""), PATH, channel.r#type);
+        let upstream_headers = upstream::rewrite_headers(&headers, &selected.key, channel.header_override.as_deref());
+
+        let response = match state.client.post(&url).headers(upstream_headers).body(upstream_body).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!("upstream request failed: {e}");
+                last_error = Some((StatusCode::BAD_GATEWAY,
+                    Bytes::from(format!(r#"{{"error":{{"message":"upstream request failed","type":"upstream_error","code":null}}}}"#)),
+                    Some(HeaderValue::from_static("application/json"))));
+                if retry::decide(None, attempt, max_retry) == retry::RetryDecision::Retry {
+                    tokio::time::sleep(retry::backoff(None, attempt)).await;
+                    continue;
+                }
+                break;
+            }
+        };
+
+        let status = response.status();
+        if status.is_success() {
+            let content_type = response.headers().get(CONTENT_TYPE).cloned()
+                .or_else(|| Some(HeaderValue::from_static(if stream { "text/event-stream" } else { "application/json" })));
+            let upstream_req = upstream_request_id(response.headers());
+            let meta = LogMeta {
+                origin_model: origin_model.clone(), stream,
+                channel_id: selected.channel_id, channel_name: selected.channel_name.clone(),
+                user_id: ctx.user_id, username: username.clone(),
+                token_id: ctx.token_id, token_name: ctx.token_name.clone(),
+                group: group.clone(), ip: ip.clone(), request_id: request_id.clone(),
+                upstream_request_id: upstream_req, started,
+            };
+            if stream {
+                let log_state = state.clone();
+                let wants = wants_usage;
+                let mut source = response.bytes_stream();
+                let stream_body = async_stream::stream! {
+                    let mut tap = SseTap::new(wants);
+                    while let Some(item) = source.next().await {
+                        match item {
+                            Ok(chunk) => {
+                                let out = tap.feed(&chunk);
+                                if !out.is_empty() { yield Ok::<Bytes, std::io::Error>(Bytes::from(out)); }
+                            }
+                            Err(e) => { tracing::warn!("upstream stream error: {e}"); break; }
+                        }
+                    }
+                    let tail = tap.finish();
+                    if !tail.is_empty() { yield Ok::<Bytes, std::io::Error>(Bytes::from(tail)); }
+                    logging::enqueue(&log_state, meta.entry(tap.usage())).await;
+                };
+                return response_with_ct(status, content_type, Body::from_stream(stream_body));
+            } else {
+                let bytes = match response.bytes().await {
+                    Ok(b) => b,
+                    Err(e) => {
+                        logging::enqueue(&state, meta.entry(Usage::default())).await;
+                        return relay::openai_error(StatusCode::BAD_GATEWAY, format!("read upstream body failed: {e}"), "upstream_error");
+                    }
+                };
+                let usage = serde_json::from_slice::<Value>(&bytes).ok().as_ref().and_then(relay::usage_from_json).unwrap_or_default();
+                logging::enqueue(&state, meta.entry(usage)).await;
+                return response_with_ct(status, content_type, Body::from(bytes));
+            }
+        }
+
+        let content_type = response.headers().get(CONTENT_TYPE).cloned();
+        let bytes = response.bytes().await.unwrap_or_default();
+        last_error = Some((status, bytes, content_type));
+        if matches!(status.as_u16(), 401 | 403 | 429) {
+            routing::mark_key_unhealthy(&state.routing, selected.channel_id, selected.key_index);
+        }
+        if retry::decide(Some(status.as_u16()), attempt, max_retry) == retry::RetryDecision::Retry {
+            tokio::time::sleep(retry::backoff(Some(status.as_u16()), attempt)).await;
+            continue;
+        }
+        break;
+    }
+
+    match last_error {
+        Some((status, bytes, ct)) => upstream_error_response(status, &bytes, ct),
+        None => relay::openai_error(StatusCode::SERVICE_UNAVAILABLE, "no available channel", "no_channel"),
+    }
+}
+```
+
+网络错误伪造的错误体用 `axum::Json(json!({...}))` 的序列化结果或 `serde_json::to_vec(&json!({...}))`
+生成，避免手写转义错误。
+
+- [ ] **Step 5: 日志 writer 同事务更新 `accessed_time`**
+
+`src/logging.rs::flush`：插入日志的同时，用 `HashMap<i64, i64>` 按 `token_id` 去重记录最大
+`created_at`，事务提交前执行：
+
+```rust
+for (token_id, ts) in touched {
+    if let Err(e) = sqlx::query("UPDATE tokens SET accessed_time = ? WHERE id = ?")
+        .bind(ts).bind(token_id).execute(&mut *tx).await
+    {
+        tracing::warn!("update accessed_time failed: {e}");
+    }
+}
+```
+
+`tests/log_writer.rs` 增加 `CREATE TABLE tokens (...)`（至少 `id INTEGER PRIMARY KEY, accessed_time INTEGER`），
+并断言 `SELECT accessed_time FROM tokens WHERE id=2` 等于最后一次日志的 `created_at`。
+
+- [ ] **Step 6: 路由接线**
+
+`src/lib.rs` 增加 `pub mod relay;`。
+`src/main.rs` relay 路由增加：
+
+```rust
+.route("/v1/chat/completions", axum::routing::post(solo_new_api_rust::relay::chat::chat_completions))
+.layer(axum::extract::DefaultBodyLimit::max(config.max_request_bytes))
+```
+
+- [ ] **Step 7: 运行测试**
+
+Run: `cargo test --test relay_helpers`、`cargo test`
+Expected: 全绿。
+
+```bash
+git add Cargo.toml Cargo.lock src tests
+git commit -m "feat(m2): chat completions relay with streaming usage tap"
+```
