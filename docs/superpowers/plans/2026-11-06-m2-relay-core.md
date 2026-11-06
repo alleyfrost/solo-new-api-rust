@@ -1270,3 +1270,39 @@ Expected: 全绿。
 git add Cargo.toml Cargo.lock src tests
 git commit -m "feat(m2): chat completions relay with streaming usage tap"
 ```
+
+---
+
+## Task 7: 跨协议转发（Anthropic Messages / OpenAI Responses）
+
+**Files:**
+- Create: `vendor/switchyard-protocol`、`vendor/switchyard-translation`（Switchyard 0.3.0，源码 commit `c365efe832822541024704aadf6a0d5c81cc0528`，Apache-2.0）
+- Create: `src/relay/forward.rs`、`src/relay/messages.rs`、`src/relay/responses.rs`
+- Modify: `src/relay/mod.rs`、`src/relay/chat.rs`、`src/main.rs`、`Cargo.toml`
+- Test: `tests/translation_probe.rs`、扩充 `tests/chat_relay.rs`
+
+**设计：**
+- 客户端协议由入口决定：`Wire::Chat` / `Messages` / `Responses`；上游协议由渠道类型决定：14 → Anthropic Messages，其余 → OpenAI Chat。
+- 同协议：请求/响应/SSE 原样透传（Chat 仍做 usage-only 事件隐藏与 usage 抽取）。
+- 跨协议：请求用 `TranslationEngine::translate_request`，响应用 `translate_response`，流式用 `translate_event` + `finish_stream` 逐事件转换并重新加 SSE 帧。
+- Anthropic 上游：无显式 Authorization override 时移除 Bearer，改用 `x-api-key`，并补 `anthropic-version: 2023-06-01`。
+- usage 抽取兼容 `usage`、`message.usage`、`response.usage`，流式按字段取最大值合并。
+- 转换失败不重试：请求转换失败返回 400，响应转换失败返回 502。
+
+**验收：**
+1. Chat / Responses 客户端 → Chat 上游请求与响应转换正确。
+2. Anthropic 客户端 → Chat 上游（非流式 + 流式）转换正确，流式为 `event:` + `data:` 帧。
+3. Chat 客户端 → Anthropic 上游转换正确。
+4. Anthropic 同协议透传，使用 `x-api-key` 且不带 Authorization。
+5. 上述路径日志 usage 正确。
+
+```bash
+cargo test --test translation_probe
+cargo test --test chat_relay
+cargo test
+```
+
+```bash
+git add Cargo.toml Cargo.lock vendor src tests
+git commit -m "feat(m2): cross-protocol relay via vendored switchyard"
+```
