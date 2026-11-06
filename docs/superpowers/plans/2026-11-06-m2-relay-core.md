@@ -1240,3 +1240,33 @@ Expected: 全绿。
 git add Cargo.toml Cargo.lock src tests
 git commit -m "feat(m2): chat completions relay with streaming usage tap"
 ```
+
+---
+
+## Task 6: 转发端到端测试（wiremock）
+
+**Files:**
+- Create: `tests/chat_relay.rs`
+- Modify: `Cargo.toml`（dev-dependency `wiremock = "0.6"`）
+
+**覆盖场景：**
+1. 非流式成功：上游鉴权头、请求模型透传、响应体原样返回；日志 `quota=0`、usage 正确、`is_stream=0`。
+2. 模型映射 + `header_override`：上游收到映射后的模型与自定义头。
+3. 429 重试：多 Key 渠道先 `k1` 429、再 `k2` 200，且只请求两次。
+4. 400 不重试：4xx 原样透传，上游只被调用一次。
+5. 流式：客户端未要求 usage 时隐藏 usage-only 事件，日志仍记录 usage；上游收到 `stream_options.include_usage=true`。
+6. 流式且客户端要求 usage：usage 事件原样转发。
+
+**验证：**
+
+```bash
+cargo test --test chat_relay
+cargo test
+```
+
+Expected: 全绿。
+
+```bash
+git add Cargo.toml Cargo.lock src tests
+git commit -m "feat(m2): chat completions relay with streaming usage tap"
+```
