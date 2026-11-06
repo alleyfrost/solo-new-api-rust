@@ -127,13 +127,26 @@ pub async fn self_info(
     .fetch_optional(&state.pool)
     .await
     .map_err(internal)?;
+    // 只记用量不记金额：表头三个数字取自日志聚合，而不是 users.quota / used_quota。
+    // 缺 logs 表时按零处理，资料页本身不应因此不可用。
+    let usage: (i64, i64, i64) = sqlx::query_as(
+        "SELECT COUNT(*), COALESCE(SUM(prompt_tokens),0), COALESCE(SUM(completion_tokens),0) \
+         FROM logs WHERE type=2 AND user_id=?",
+    )
+    .bind(ctx.user_id)
+    .fetch_one(&state.pool)
+    .await
+    .unwrap_or_default();
     let mut value = session::user_json(&user);
-    if let Some(map) = value.as_object_mut()
-        && let Some((setting, created_at, password)) = extra
-    {
-        map.insert("setting".into(), serde_json::json!(setting.unwrap_or_default()));
-        map.insert("created_time".into(), serde_json::json!(created_at.unwrap_or(0)));
-        map.insert("has_password".into(), serde_json::json!(!password.is_empty()));
+    if let Some(map) = value.as_object_mut() {
+        map.insert("request_count".into(), serde_json::json!(usage.0));
+        map.insert("prompt_tokens".into(), serde_json::json!(usage.1));
+        map.insert("completion_tokens".into(), serde_json::json!(usage.2));
+        if let Some((setting, created_at, password)) = extra {
+            map.insert("setting".into(), serde_json::json!(setting.unwrap_or_default()));
+            map.insert("created_time".into(), serde_json::json!(created_at.unwrap_or(0)));
+            map.insert("has_password".into(), serde_json::json!(!password.is_empty()));
+        }
     }
     Ok(json_ok(&value))
 }
