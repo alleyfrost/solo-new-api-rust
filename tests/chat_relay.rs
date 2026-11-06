@@ -730,3 +730,50 @@ async fn completions_rerank_moderations_share_passthrough() {
         );
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_requests_all_succeed_and_log() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(ok_json())
+        .mount(&server)
+        .await;
+
+    let Fixture { app, pool, writer } = setup(&server.uri(), "sk-up", 1, None, None).await;
+    let mut tasks = Vec::new();
+    for _ in 0..32 {
+        let app = app.clone();
+        tasks.push(tokio::spawn(async move {
+            let res = app
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/v1/chat/completions")
+                        .header("authorization", "Bearer sk-abc123")
+                        .header("content-type", "application/json")
+                        .body(Body::from(
+                            r#"{"model":"m1","messages":[{"role":"user","content":"hi"}]}"#,
+                        ))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            res.status().as_u16()
+        }));
+    }
+    for task in tasks {
+        assert_eq!(task.await.unwrap(), 200);
+    }
+    drop(app);
+    let _ = tokio::time::timeout(Duration::from_secs(5), writer).await;
+    let (count, prompt, completion): (i64, i64, i64) = sqlx::query_as(
+        "SELECT COUNT(*), COALESCE(SUM(prompt_tokens),0), COALESCE(SUM(completion_tokens),0) FROM logs",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(count, 32);
+    assert_eq!(prompt, 320);
+    assert_eq!(completion, 160);
+}
