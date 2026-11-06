@@ -159,8 +159,12 @@
 | 管理 API | 通过 | token/channel/models/group/log/stat/data 全部 `success:true` |
 | 浏览器逐页实测（2026-11-07，宿主机直跑 + 最新 `web/dist`） | 通过 | `/keys` 分组列只显示 `default`/`vip`（臆造的 1x 倍数已移除）；`/playground` 空状态与输入区（模型/分组选择器、发送）正常；`/profile` = 基本资料 + 改密码 + 会话管理，用量卡为 API 请求 / 输入 Token / 输出 Token；`/dashboard/flow` 桑基图按 logs 聚合出 用户→节点→令牌→分组→模型→渠道；`/models/metadata` 列出 6 个渠道派生模型，广场状态、绑定渠道与分组正确；页面零 console error，XHR 全 200 |
 | i18n 覆盖对账 | 通过 | 提取 `web/src` 全部 `t('…')` 字面量与 `zh.json` 比对，仅个人资料页两条长度提示缺 key，已补齐 7 个语言后复跑归零 |
+| 镜像重建 + 产物一致（2026-11-07） | 通过 | `deploy/build.sh` 重出 linux/amd64 镜像：镜像内 `web/dist` 入口哈希与浏览器实测那份一致（`index.ee3929f7d9.js` / `index.fe6804717b.css`），二进制构建时间晚于全部提交；容器 30.5 MiB / 450 MiB |
+| Docker 登录态逐页实测（:3006，2026-11-07） | 通过 | `/models/metadata` 总计 6、全部 缺元数据 / 正常展示 / 渠道 2·分组 2；`/keys` 分组列只显示 `default`/`vip`；`/channels` 批量测试 6/6 成功（164–169 毫秒，打到本地 mock）；`/api/channel/fetch_models/3` 给出 2 个新模型 + 6 个已移除；`/playground`、`/profile`（含新译的“使用 1–20 个字符。”）、`/dashboard/flow`、`/usage-logs/common` 零 console error、XHR 全 200；日志表头为 时间/渠道/用户/令牌/模型/流/Token/总 Token 数/耗时/详情，无金额列 |
+| 转发/流式/内存矩阵本轮未重跑 | 说明 | 本轮后端改动只在 `src/routes/admin/models.rs` 与 `src/routes/user.rs` 的分组接口，`src/relay/*` 与上一轮通过本节全部转发、流式、断连、并发内存项时同源；渠道测试 6/6 走的是同一套上游客户端与协议转换，只作为新二进制的间接证据 |
 
 - 注意：容器运行期间不要用宿主机 `sqlite3`/`python` 改 `/tmp/solo-deploy-data/one-api.db`。宿主与 VM 共用同一 WAL `-shm` 映射会触发 `SQLITE_IOERR_WRITE (522)`，日志写失败是测试手法造成的假故障；改库要先 `docker stop`，查日志改用 `/api/log`。
+- 本轮 Docker 登录用的是写在 `/tmp/solo-deploy-data` scratch 副本里的一次性 argon2id 口令（仓库快照 `data/one-api-consistent.db` 与线上库未改动），渠道 `base_url` 也只在这份副本里改指向 mock；验收后整个目录连同容器一起删除。要自己复核就重跑 `bash deploy/run-local.sh`，它会从快照重新播种，届时用真实口令登录。
 
 ## 5. 线上现状（用于验收）
 
