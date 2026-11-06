@@ -222,44 +222,6 @@ export interface CopyChannelResponse {
 }
 
 // ============================================================================
-// Multi-Key Management Types
-// ============================================================================
-
-export interface KeyStatus {
-  index: number
-  status: number // 1: enabled, 2: manual disabled, 3: auto disabled
-  disabled_time?: number
-  reason?: string
-  key_preview?: string
-}
-
-export type MultiKeyConfirmAction = {
-  type:
-    | 'enable'
-    | 'disable'
-    | 'delete'
-    | 'enable-all'
-    | 'disable-all'
-    | 'delete-disabled'
-  keyIndex?: number
-}
-
-export interface MultiKeyStatusResponse {
-  success: boolean
-  message?: string
-  data?: {
-    keys: KeyStatus[]
-    total: number
-    page: number
-    page_size: number
-    total_pages: number
-    enabled_count: number
-    manual_disabled_count: number
-    auto_disabled_count: number
-  }
-}
-
-// ============================================================================
 // API Request Parameters
 // ============================================================================
 
@@ -305,22 +267,6 @@ export interface ChannelTestParams {
 export interface CopyChannelParams {
   suffix?: string
   reset_balance?: boolean
-}
-
-export interface MultiKeyManageParams {
-  channel_id: number
-  action:
-    | 'get_key_status'
-    | 'disable_key'
-    | 'enable_key'
-    | 'enable_all_keys'
-    | 'disable_all_keys'
-    | 'delete_key'
-    | 'delete_disabled_keys'
-  key_index?: number
-  page?: number
-  page_size?: number
-  status?: number // 1=enabled, 2=manual_disabled, 3=auto_disabled
 }
 
 export interface BatchDeleteParams {

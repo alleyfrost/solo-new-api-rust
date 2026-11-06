@@ -17,19 +17,15 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 /* eslint-disable react-refresh/only-export-components */
-import { useQueryClient } from '@tanstack/react-query'
 import type { OnChangeFn, SortingState } from '@tanstack/react-table'
 import React, {
   createContext,
   useContext,
   useState,
-  useCallback,
   useMemo,
   useEffect,
 } from 'react'
 
-import { useChannelUpstreamUpdates } from '../hooks/use-channel-upstream-updates'
-import { channelsQueryKeys } from '../lib'
 import type { Channel } from '../types'
 
 // ============================================================================
@@ -41,13 +37,8 @@ type DialogType =
   | 'update-channel'
   | 'test-channel'
   | 'fetch-models'
-  | 'ollama-models'
-  | 'inference-status'
-  | 'multi-key-manage'
   | 'copy-channel'
   | null
-
-type UpstreamUpdateState = ReturnType<typeof useChannelUpstreamUpdates>
 
 type ChannelsContextType = {
   open: DialogType
@@ -64,7 +55,6 @@ type ChannelsContextType = {
   setSensitiveVisible: (visible: boolean) => void
   priorityActionContainer: HTMLDivElement | null
   setPriorityActionContainer: (container: HTMLDivElement | null) => void
-  upstream: UpstreamUpdateState
 }
 
 // ============================================================================
@@ -102,12 +92,6 @@ export function ChannelsProvider({ children }: { children: React.ReactNode }) {
   const [priorityActionContainer, setPriorityActionContainer] =
     useState<HTMLDivElement | null>(null)
 
-  const queryClient = useQueryClient()
-  const refreshChannels = useCallback(async () => {
-    await queryClient.invalidateQueries({ queryKey: channelsQueryKeys.all })
-  }, [queryClient])
-  const upstream = useChannelUpstreamUpdates(refreshChannels)
-
   // useState setters are stable, so the context value only needs to change when
   // an actual state value changes. Memoizing avoids handing every consumer
   // (including all channel cards/cells) a brand-new object on each render.
@@ -127,7 +111,6 @@ export function ChannelsProvider({ children }: { children: React.ReactNode }) {
       setSensitiveVisible,
       priorityActionContainer,
       setPriorityActionContainer,
-      upstream,
     }),
     [
       open,
@@ -137,7 +120,6 @@ export function ChannelsProvider({ children }: { children: React.ReactNode }) {
       batchMode,
       sensitiveVisible,
       priorityActionContainer,
-      upstream,
     ]
   )
 

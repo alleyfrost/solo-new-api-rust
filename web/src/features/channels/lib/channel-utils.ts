@@ -21,7 +21,6 @@ import { formatTimestampToDate } from '@/lib/format'
 import {
   CHANNEL_STATUS_CONFIG,
   CHANNEL_TYPES,
-  MULTI_KEY_STATUS_CONFIG,
   RESPONSE_TIME_CONFIG,
   RESPONSE_TIME_THRESHOLDS,
   TYPE_TO_KEY_PROMPT,
@@ -139,16 +138,6 @@ export function getChannelStatusBadge(status: number) {
 }
 
 /**
- * Get multi-key status badge configuration
- */
-export function getMultiKeyStatusBadge(status: number) {
-  return (
-    MULTI_KEY_STATUS_CONFIG[status as keyof typeof MULTI_KEY_STATUS_CONFIG] ||
-    MULTI_KEY_STATUS_CONFIG[1]
-  )
-}
-
-/**
  * Check if channel is enabled
  */
 export function isChannelEnabled(channel: Channel): boolean {
@@ -190,19 +179,6 @@ export function formatChannelKey(
 
   // For longer keys, show more context
   return `${key.slice(0, 8)}...${key.slice(-8)}`
-}
-
-/**
- * Format key preview for multi-key display
- */
-export function formatKeyPreview(key: string, maxLength: number = 10): string {
-  if (!key) {
-    return ''
-  }
-  if (key.length <= maxLength) {
-    return key
-  }
-  return `${key.slice(0, maxLength)}...`
 }
 
 /**

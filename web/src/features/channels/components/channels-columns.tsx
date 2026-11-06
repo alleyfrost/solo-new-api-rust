@@ -57,9 +57,6 @@ import { getCodexUsage } from '../api'
 import {
   CHANNEL_STATUS_CONFIG,
   CHANNEL_TYPE_TASK_PLUGIN,
-  CHANNEL_TYPE_VLLM,
-  CHANNEL_TYPE_SGLANG,
-  MODEL_FETCHABLE_TYPES,
 } from '../constants'
 import {
   formatRelativeTime,
@@ -76,7 +73,6 @@ import {
   isTagAggregateRow,
   type TagRow,
 } from '../lib'
-import { parseUpstreamUpdateMeta } from '../lib/upstream-update-utils'
 import type { Channel } from '../types'
 import { TaskPluginChannelBadge } from './channel-type-badge'
 import { useChannels } from './channels-provider'
@@ -103,70 +99,6 @@ function parseIonetMeta(otherInfo: string | null | undefined): null | {
     return null
   }
   return null
-}
-
-/**
- * Upstream update tags (+N / -N) shown on channel name for model-fetchable channels
- */
-function UpstreamUpdateTags({ channel }: { channel: Channel }) {
-  const { upstream, setCurrentRow } = useChannels()
-  if (!MODEL_FETCHABLE_TYPES.has(channel.type)) {
-    return null
-  }
-
-  const meta = parseUpstreamUpdateMeta(channel.settings)
-  if (!meta.enabled) {
-    return null
-  }
-
-  const addCount = meta.pendingAddModels.length
-  const removeCount = meta.pendingRemoveModels.length
-  if (addCount === 0 && removeCount === 0) {
-    return null
-  }
-
-  return (
-    <div className='flex items-center gap-0.5'>
-      {addCount > 0 && (
-        <StatusBadge
-          label={`+${addCount}`}
-          variant='success'
-          size='sm'
-          copyable={false}
-          className='cursor-pointer'
-          onClick={(e: React.MouseEvent) => {
-            e.stopPropagation()
-            setCurrentRow(channel)
-            upstream.openModal(
-              channel,
-              meta.pendingAddModels,
-              meta.pendingRemoveModels,
-              'add'
-            )
-          }}
-        />
-      )}
-      {removeCount > 0 && (
-        <StatusBadge
-          label={`-${removeCount}`}
-          variant='danger'
-          size='sm'
-          copyable={false}
-          className='cursor-pointer'
-          onClick={(e: React.MouseEvent) => {
-            e.stopPropagation()
-            setCurrentRow(channel)
-            upstream.openModal(
-              channel,
-              meta.pendingAddModels,
-              meta.pendingRemoveModels,
-              'remove'
-            )
-          }}
-        />
-      )}
-    </div>
-  )
 }
 
 /**
@@ -240,21 +172,16 @@ function WeightCell({ channel }: { channel: Channel }) {
 const SENSITIVE_MASK = '••••'
 
 /**
- * Account info cell: inference channels open their status dialog and Codex
- * (type 57) channels open their usage dialog; other rows render a dash.
+ * Account info cell: Codex (type 57) channels open their usage dialog;
+ * other rows render a dash.
  */
 export function ChannelAccountCell({ channel }: { channel: Channel }) {
   const { t } = useTranslation()
-  const { sensitiveVisible, setCurrentRow, setOpen } = useChannels()
+  const { sensitiveVisible } = useChannels()
   const [isUpdating, setIsUpdating] = useState(false)
   const [codexUsageOpen, setCodexUsageOpen] = useState(false)
   const [codexUsageResponse, setCodexUsageResponse] =
     useState<CodexUsageDialogData | null>(null)
-
-  const isInferenceChannel =
-    channel.type === CHANNEL_TYPE_VLLM || channel.type === CHANNEL_TYPE_SGLANG
-  const inferenceStatusLabel =
-    channel.type === CHANNEL_TYPE_SGLANG ? t('SGLang status') : t('vLLM status')
 
   const fetchCodexUsage = async () => {
     if (isUpdating) {
@@ -279,42 +206,14 @@ export function ChannelAccountCell({ channel }: { channel: Channel }) {
     return <span className='text-muted-foreground text-xs'>-</span>
   }
 
-  if (isInferenceChannel) {
-    return (
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                variant='ghost'
-                size='sm'
-                className='-ml-1.5 h-auto rounded-full p-0'
-                aria-haspopup='dialog'
-                onClick={() => {
-                  setCurrentRow(channel)
-                  setOpen('inference-status')
-                }}
-              />
-            }
-          >
-            <StatusBadge
-              label={sensitiveVisible ? inferenceStatusLabel : SENSITIVE_MASK}
-              variant='info'
-              size='sm'
-              copyable={false}
-              showDot={false}
-              className='cursor-pointer'
-            />
-          </TooltipTrigger>
-          <TooltipContent side='top'>
-            <p>{inferenceStatusLabel}</p>
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-    )
-  }
-
   if (channel.type === 57) {
+    let codexBadgeLabel: string = SENSITIVE_MASK
+    if (isUpdating) {
+      codexBadgeLabel = t('Updating...')
+    } else if (sensitiveVisible) {
+      codexBadgeLabel = t('Account Info')
+    }
+
     return (
       <TooltipProvider>
         <Tooltip>
@@ -330,13 +229,7 @@ export function ChannelAccountCell({ channel }: { channel: Channel }) {
             }
           >
             <StatusBadge
-              label={
-                isUpdating
-                  ? t('Updating...')
-                  : sensitiveVisible
-                    ? t('Account Info')
-                    : SENSITIVE_MASK
-              }
+              label={codexBadgeLabel}
               variant='info'
               size='sm'
               copyable={false}
@@ -521,7 +414,6 @@ export function useChannelsColumns(
                       </Tooltip>
                     </TooltipProvider>
                   )}
-                  <UpstreamUpdateTags channel={channel} />
                 </div>
                 {channel.remark && (
                   <TooltipProvider delay={200}>

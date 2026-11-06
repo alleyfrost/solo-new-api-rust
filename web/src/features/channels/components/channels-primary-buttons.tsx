@@ -24,8 +24,6 @@ import {
   Settings2,
   Tags,
   ListChecks,
-  RefreshCw,
-  ArrowUpFromLine,
 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -76,7 +74,6 @@ export function ChannelsPrimaryButtons() {
     batchMode,
     setBatchMode,
     setPriorityActionContainer,
-    upstream,
   } = useChannels()
   const queryClient = useQueryClient()
   const [showConsistencyDialog, setShowConsistencyDialog] = useState(false)
@@ -200,28 +197,6 @@ export function ChannelsPrimaryButtons() {
             </DropdownMenuCheckboxItem>
 
             <DropdownMenuSeparator className='sm:hidden' />
-
-            <DropdownMenuItem
-              onClick={() => upstream.detectAllUpdates()}
-              disabled={upstream.detectAllLoading}
-            >
-              {t('Detect All Upstream Updates')}
-              <DropdownMenuShortcut>
-                <RefreshCw className='h-4 w-4' />
-              </DropdownMenuShortcut>
-            </DropdownMenuItem>
-
-            <DropdownMenuItem
-              onClick={() => upstream.applyAllUpdates()}
-              disabled={upstream.applyAllLoading}
-            >
-              {t('Apply All Upstream Updates')}
-              <DropdownMenuShortcut>
-                <ArrowUpFromLine className='h-4 w-4' />
-              </DropdownMenuShortcut>
-            </DropdownMenuItem>
-
-            <DropdownMenuSeparator />
 
             <DropdownMenuItem
               onSelect={(e) => {

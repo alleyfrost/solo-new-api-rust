@@ -16,12 +16,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { getGroups as getUserGroups } from '@/lib/api'
-import { api, type ApiRequestConfig } from '@/lib/api'
+import {
+  api,
+  getGroups as getUserGroups,
+  type ApiRequestConfig,
+} from '@/lib/api'
 import { requireServerSuccess } from '@/lib/server-error-message'
 
 import type { PriorityMove, PriorityOrder } from './lib/channel-priority-order'
-import type { InferenceStatus } from './lib/inference-status'
 import type {
   AddChannelRequest,
   BatchDeleteParams,
@@ -34,8 +36,6 @@ import type {
   GetChannelResponse,
   GetChannelsParams,
   GetChannelsResponse,
-  MultiKeyManageParams,
-  MultiKeyStatusResponse,
   SearchChannelsParams,
   SearchChannelsResponse,
 } from './types'
@@ -62,18 +62,6 @@ export async function reorderChannelPriority(
   const response = await api.post<{ success: boolean; data: PriorityOrder }>(
     '/api/channel/priority/reorder',
     move
-  )
-  return requireServerSuccess(response.data).data
-}
-
-export async function getInferenceStatus(
-  channelId: number,
-  provider: 'vllm' | 'sglang',
-  signal?: AbortSignal
-): Promise<InferenceStatus> {
-  const response = await api.get<{ success: boolean; data: InferenceStatus }>(
-    `/api/channel/${channelId}/${provider}/status`,
-    { signal, disableDuplicate: true }
   )
   return requireServerSuccess(response.data).data
 }
@@ -386,120 +374,6 @@ export async function resetCodexUsage(
 }
 
 // ============================================================================
-// Multi-Key Management
-// ============================================================================
-
-/**
- * Manage multi-key channel operations
- */
-export async function manageMultiKeys(
-  params: MultiKeyManageParams
-): Promise<MultiKeyStatusResponse | { success: boolean; message?: string }> {
-  const res = await api.post(
-    '/api/channel/multi_key/manage',
-    params,
-    channelActionConfig()
-  )
-  return res.data
-}
-
-/**
- * Get key status for multi-key channel
- */
-export async function getMultiKeyStatus(
-  channelId: number,
-  page = 1,
-  pageSize = 50,
-  status?: number
-): Promise<MultiKeyStatusResponse> {
-  return manageMultiKeys({
-    channel_id: channelId,
-    action: 'get_key_status',
-    page,
-    page_size: pageSize,
-    status,
-  }) as Promise<MultiKeyStatusResponse>
-}
-
-/**
- * Enable a specific key in multi-key channel
- */
-export async function enableMultiKey(
-  channelId: number,
-  keyIndex: number
-): Promise<{ success: boolean; message?: string }> {
-  return manageMultiKeys({
-    channel_id: channelId,
-    action: 'enable_key',
-    key_index: keyIndex,
-  }) as Promise<{ success: boolean; message?: string }>
-}
-
-/**
- * Disable a specific key in multi-key channel
- */
-export async function disableMultiKey(
-  channelId: number,
-  keyIndex: number
-): Promise<{ success: boolean; message?: string }> {
-  return manageMultiKeys({
-    channel_id: channelId,
-    action: 'disable_key',
-    key_index: keyIndex,
-  }) as Promise<{ success: boolean; message?: string }>
-}
-
-/**
- * Delete a specific key in multi-key channel
- */
-export async function deleteMultiKey(
-  channelId: number,
-  keyIndex: number
-): Promise<{ success: boolean; message?: string }> {
-  return manageMultiKeys({
-    channel_id: channelId,
-    action: 'delete_key',
-    key_index: keyIndex,
-  }) as Promise<{ success: boolean; message?: string }>
-}
-
-/**
- * Enable all keys in multi-key channel
- */
-export async function enableAllMultiKeys(
-  channelId: number
-): Promise<{ success: boolean; message?: string }> {
-  return manageMultiKeys({
-    channel_id: channelId,
-    action: 'enable_all_keys',
-  }) as Promise<{ success: boolean; message?: string }>
-}
-
-/**
- * Disable all keys in multi-key channel
- */
-export async function disableAllMultiKeys(
-  channelId: number
-): Promise<{ success: boolean; message?: string }> {
-  return manageMultiKeys({
-    channel_id: channelId,
-    action: 'disable_all_keys',
-  }) as Promise<{ success: boolean; message?: string }>
-}
-
-/**
- * Delete all disabled keys in multi-key channel
- */
-export async function deleteDisabledMultiKeys(
-  channelId: number
-): Promise<{ success: boolean; message?: string; data?: number }> {
-  return manageMultiKeys({
-    channel_id: channelId,
-    action: 'delete_disabled_keys',
-  }) as Promise<{ success: boolean; message?: string; data?: number }>
-}
-
-// ============================================================================
 // Utility Functions
 // ============================================================================
 
@@ -519,20 +393,6 @@ export async function fetchModels(data: {
     '/api/channel/fetch_models',
     data,
     channelActionConfig()
-  )
-  return res.data
-}
-
-/**
- * Delete an Ollama model from a channel
- */
-export async function deleteOllamaModel(params: {
-  channel_id: number
-  model_name: string
-}): Promise<{ success: boolean; message?: string }> {
-  const res = await api.delete(
-    '/api/channel/ollama/delete',
-    channelActionConfig({ data: params })
   )
   return res.data
 }

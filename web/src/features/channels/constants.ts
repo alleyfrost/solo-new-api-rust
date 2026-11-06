@@ -267,37 +267,6 @@ export const CHANNEL_STATUS_CONFIG = {
 }
 
 // ============================================================================
-// Multi-Key Status
-// ============================================================================
-
-export const MULTI_KEY_STATUS = {
-  ENABLED: 1,
-  MANUAL_DISABLED: 2,
-  AUTO_DISABLED: 3,
-} as const
-
-export const MULTI_KEY_STATUS_LABELS = {
-  [MULTI_KEY_STATUS.ENABLED]: 'Enabled',
-  [MULTI_KEY_STATUS.MANUAL_DISABLED]: 'Manual Disabled',
-  [MULTI_KEY_STATUS.AUTO_DISABLED]: 'Auto Disabled',
-} as const
-
-export const MULTI_KEY_STATUS_CONFIG = {
-  [MULTI_KEY_STATUS.ENABLED]: {
-    variant: 'success' as const,
-    label: 'Enabled',
-  },
-  [MULTI_KEY_STATUS.MANUAL_DISABLED]: {
-    variant: 'neutral' as const,
-    label: 'Manual Disabled',
-  },
-  [MULTI_KEY_STATUS.AUTO_DISABLED]: {
-    variant: 'danger' as const,
-    label: 'Auto Disabled',
-  },
-}
-
-// ============================================================================
 // Multi-Key Modes
 // ============================================================================
 
