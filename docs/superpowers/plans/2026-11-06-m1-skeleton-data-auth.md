@@ -455,7 +455,7 @@ git commit -m "feat(m1): sqlite connection and schema validation"
 
 **Files:**
 - Create: `src/model.rs`, `src/state.rs`（替换 Task 1 的占位）
-- Modify: `src/lib.rs`
+- Modify: `src/lib.rs`, `src/main.rs`, `tests/integration_m1.rs`（AppState 新增 caches 字段）
 - Test: `tests/state_cache.rs`
 
 **Interfaces:**
@@ -586,6 +586,15 @@ pub struct AppState {
 ```rust
 let caches = state::Caches::load(&pool).await?;
 let state = state::AppState { config: config.clone(), pool, caches: std::sync::Arc::new(std::sync::RwLock::new(caches)) };
+```
+
+同步修改 `tests/integration_m1.rs` 的 `AppState` 构造，加入空缓存：
+
+```rust
+caches: std::sync::Arc::new(std::sync::RwLock::new(solo_new_api_rust::state::Caches {
+    users: Default::default(), tokens: Default::default(), channels: Default::default(),
+    abilities: Default::default(), options: Default::default(),
+})),
 ```
 
 - [ ] **Step 4: 写测试 `tests/state_cache.rs`**
