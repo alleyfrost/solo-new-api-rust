@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMemo } from 'react'
 
 import { STATUS_QUERY_KEY } from '@/lib/status-query'
 
@@ -25,22 +26,30 @@ import type { OptionRow } from './types'
 
 export const OPTIONS_QUERY_KEY = ['settings', 'options'] as const
 
+// 固定的空数组引用：loading 期间 `query.data ?? []` 会每帧产生新对象，
+// 依赖它的 useEffect 会变成无限重渲染。
+const NO_ROWS: OptionRow[] = []
+
 export function useOptions() {
   const query = useQuery({
     queryKey: OPTIONS_QUERY_KEY,
     queryFn: async () => {
       const response = await getOptions()
       if (!response.success) throw new Error(response.message ?? '')
-      return response.data ?? []
+      return response.data ?? NO_ROWS
     },
     staleTime: 30 * 1000,
   })
 
-  const values: Record<string, string> = {}
-  const rows: OptionRow[] = query.data ?? []
-  for (const row of rows) {
-    values[row.key] = row.value
-  }
+  const rows = query.data ?? NO_ROWS
+  const values = useMemo(() => {
+    const out: Record<string, string> = {}
+    for (const row of rows) {
+      out[row.key] = row.value
+    }
+    return out
+  }, [rows])
+
   return { ...query, values }
 }
 

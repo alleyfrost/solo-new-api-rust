@@ -142,51 +142,69 @@ export function SiteCard() {
       ) : (
         <div className='space-y-4'>
           <div className='grid gap-4 sm:grid-cols-2'>
-            <label className='space-y-1.5'>
-              <span className='text-sm font-medium'>{t('System Name')}</span>
+            <div className='space-y-1.5'>
+              <label
+                htmlFor='settings-system-name'
+                className='text-sm font-medium'
+              >
+                {t('System Name')}
+              </label>
               <Input
+                id='settings-system-name'
                 value={values.systemName}
                 maxLength={SYSTEM_NAME_MAX_LENGTH}
                 onChange={field('systemName')}
                 disabled={save.isPending}
               />
-              <span className='text-muted-foreground text-xs'>
+              <p className='text-muted-foreground text-xs'>
                 {t('Use 1–{{max}} characters.', {
                   max: SYSTEM_NAME_MAX_LENGTH,
                 })}
-              </span>
-            </label>
-            <label className='space-y-1.5'>
-              <span className='text-sm font-medium'>{t('Logo URL')}</span>
+              </p>
+            </div>
+            <div className='space-y-1.5'>
+              <label htmlFor='settings-logo' className='text-sm font-medium'>
+                {t('Logo URL')}
+              </label>
               <Input
+                id='settings-logo'
                 value={values.logo}
                 maxLength={LOGO_MAX_LENGTH}
                 placeholder={t('Leave empty to use the built-in logo')}
                 onChange={field('logo')}
                 disabled={save.isPending}
               />
-            </label>
+            </div>
           </div>
 
-          <label className='space-y-1.5'>
-            <span className='text-sm font-medium'>{t('Server Address')}</span>
+          <div className='space-y-1.5'>
+            <label
+              htmlFor='settings-server-address'
+              className='text-sm font-medium'
+            >
+              {t('Server Address')}
+            </label>
             <Input
+              id='settings-server-address'
               value={values.serverAddress}
               maxLength={ADDRESS_MAX_LENGTH}
               placeholder={window.location.origin}
               onChange={field('serverAddress')}
               disabled={save.isPending}
             />
-            <span className='text-muted-foreground text-xs'>
+            <p className='text-muted-foreground text-xs'>
               {t(
                 'Used when copying client configurations. Empty means the current domain.'
               )}
-            </span>
-          </label>
+            </p>
+          </div>
 
-          <label className='space-y-1.5'>
-            <span className='text-sm font-medium'>{t('Notice')}</span>
+          <div className='space-y-1.5'>
+            <label htmlFor='settings-notice' className='text-sm font-medium'>
+              {t('Notice')}
+            </label>
             <Textarea
+              id='settings-notice'
               value={values.notice}
               maxLength={NOTICE_MAX_LENGTH}
               rows={3}
@@ -195,10 +213,10 @@ export function SiteCard() {
               }
               disabled={save.isPending}
             />
-            <span className='text-muted-foreground text-xs'>
+            <p className='text-muted-foreground text-xs'>
               {t('Shown on the sign-in page.')}
-            </span>
-          </label>
+            </p>
+          </div>
 
           <div className='flex justify-end'>
             <Button
