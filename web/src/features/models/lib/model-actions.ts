@@ -22,8 +22,22 @@ import { toast } from 'sonner'
 
 import { handleServerError } from '@/lib/handle-server-error'
 
-import { updateModelStatus } from '../api'
-import { invalidateVendorData } from '../vendor-api'
+import { updateModel } from '../api'
+import { modelsQueryKeys, vendorsQueryKeys } from './query-keys'
+
+// ============================================================================
+// Cache Invalidation
+// ============================================================================
+
+/**
+ * Refresh the model list and the read-only vendor reference data
+ */
+export async function invalidateModelData(queryClient: QueryClient) {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: modelsQueryKeys.all }),
+    queryClient.invalidateQueries({ queryKey: vendorsQueryKeys.all }),
+  ])
+}
 
 // ============================================================================
 // Model Status Actions
@@ -38,10 +52,10 @@ export async function handleEnableModel(
   onSuccess?: () => void
 ): Promise<void> {
   try {
-    const response = await updateModelStatus(id, 1)
+    const response = await updateModel({ id, status: 1 })
     if (response.success) {
       toast.success(i18next.t('Model shown in model square'))
-      if (queryClient) await invalidateVendorData(queryClient)
+      if (queryClient) await invalidateModelData(queryClient)
       onSuccess?.()
     } else {
       handleServerError(
@@ -63,10 +77,10 @@ export async function handleDisableModel(
   onSuccess?: () => void
 ): Promise<void> {
   try {
-    const response = await updateModelStatus(id, 0)
+    const response = await updateModel({ id, status: 0 })
     if (response.success) {
       toast.success(i18next.t('Model hidden from model square'))
-      if (queryClient) await invalidateVendorData(queryClient)
+      if (queryClient) await invalidateModelData(queryClient)
       onSuccess?.()
     } else {
       handleServerError(
@@ -116,7 +130,7 @@ export async function handleBatchEnableModels(
   }
 
   try {
-    const enablePromises = ids.map((id) => updateModelStatus(id, 1))
+    const enablePromises = ids.map((id) => updateModel({ id, status: 1 }))
     const results = await Promise.all(enablePromises)
 
     let successCount = 0
@@ -136,7 +150,7 @@ export async function handleBatchEnableModels(
           count: successCount,
         })
       )
-      if (queryClient) await invalidateVendorData(queryClient)
+      if (queryClient) await invalidateModelData(queryClient)
       onSuccess?.()
     }
 
@@ -164,7 +178,7 @@ export async function handleBatchDisableModels(
   }
 
   try {
-    const disablePromises = ids.map((id) => updateModelStatus(id, 0))
+    const disablePromises = ids.map((id) => updateModel({ id, status: 0 }))
     const results = await Promise.all(disablePromises)
 
     let successCount = 0
@@ -184,7 +198,7 @@ export async function handleBatchDisableModels(
           count: successCount,
         })
       )
-      if (queryClient) await invalidateVendorData(queryClient)
+      if (queryClient) await invalidateModelData(queryClient)
       onSuccess?.()
     }
 

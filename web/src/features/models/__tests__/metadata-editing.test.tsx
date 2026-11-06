@@ -30,7 +30,6 @@ import userEvent from '@testing-library/user-event'
 import { AxiosError } from 'axios'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { pricingOptions } from '@/features/model-pricing/pricing'
 import { api } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth-store'
 
@@ -56,6 +55,7 @@ const model = {
 
 afterEach(() => {
   cleanup()
+  vi.restoreAllMocks()
   useAuthStore.getState().auth.reset()
 })
 
@@ -75,224 +75,91 @@ function renderModelActions(currentModel: Model = model, role = 100) {
   return client
 }
 
-describe('model pricing entry', () => {
-  it('saves pricing and opens connections for a channel model without creating metadata', async () => {
-    const channelModel = { ...model, id: 0, model_name: 'channel-only' }
-    let storedPrice = 1.5
-    const get = vi.spyOn(api, 'get').mockImplementation(async (url) => {
-      if (url === '/api/option/model_pricing') {
-        return {
-          data: {
-            success: true,
-            data: {
-              entries: [
-                {
-                  model_name: 'channel-only',
-                  version: 'v1',
-                  configured: { ModelPrice: storedPrice },
-                  effective: { ModelPrice: storedPrice },
-                },
-              ],
-              options: pricingOptions({}),
-              empty_version: 'empty',
-            },
-          },
-        }
-      }
-      return { data: { success: true, data: { items: [] } } }
-    })
-    const post = vi.spyOn(api, 'post')
-    const put = vi.spyOn(api, 'put')
-    const patch = vi.spyOn(api, 'patch').mockImplementation(async () => {
-      storedPrice = 0
-      return { data: { success: true } }
-    })
-    const client = renderModelActions(channelModel)
-    const user = userEvent.setup()
-    expect(screen.getByRole('button', { name: 'Add metadata' })).toBeVisible()
-    expect(
-      screen.queryByRole('button', { name: 'Open menu' })
-    ).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Pricing' }))
-    expect(screen.getByRole('tab', { name: 'Pricing' })).not.toHaveAttribute(
-      'aria-disabled',
-      'true'
-    )
-    expect(
-      await screen.findByRole('button', { name: 'Save model prices' })
-    ).toBeVisible()
-    const price = await screen.findByPlaceholderText('0.01')
-    await user.clear(price)
-    await user.type(price, '0')
-    await user.click(screen.getByRole('button', { name: 'Save model prices' }))
-    await waitFor(() =>
-      expect(patch).toHaveBeenCalledWith('/api/option/model_pricing', {
-        changes: [
-          {
-            model_name: 'channel-only',
-            expected_version: 'v1',
-            pricing: { ModelPrice: 0, 'billing_setting.billing_mode': 'ratio' },
-            reset: false,
-          },
-        ],
-      })
-    )
-    expect(put).not.toHaveBeenCalled()
-    await user.click(screen.getByRole('tab', { name: 'Channels and groups' }))
-    expect(
-      screen.getByText(
-        'Channel availability and group access are derived from enabled channels. Importing metadata does not create a callable channel.'
-      )
-    ).toBeVisible()
-    expect(get).not.toHaveBeenCalledWith('/api/models/0')
-    expect(post).not.toHaveBeenCalled()
-    client.clear()
+function renderDrawer(
+  currentRow?: Model,
+  onClose = vi.fn(),
+  role = 100
+): QueryClient {
+  useAuthStore.getState().auth.setUser({ id: 1, username: 'root', role })
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
+  render(
+    <QueryClientProvider client={client}>
+      <ModelsProvider>
+        <ModelMutateDrawer open onOpenChange={onClose} currentRow={currentRow} />
+      </ModelsProvider>
+    </QueryClientProvider>
+  )
+  return client
+}
 
-  it('opens pricing directly, keeps it selected after metadata loads, and reopens Edit on metadata', async () => {
-    let resolveDetail!: (value: Awaited<ReturnType<typeof api.get>>) => void
-    const detail = new Promise<Awaited<ReturnType<typeof api.get>>>(
-      (resolve) => {
-        resolveDetail = resolve
+function mockReferenceData(
+  handlers: (url: string) => unknown | undefined,
+  vendorItems: Array<Record<string, unknown>> = []
+) {
+  return vi.spyOn(api, 'get').mockImplementation(async (url) => {
+    const custom = handlers(url as string)
+    if (custom) return { data: custom }
+    if (url === '/api/vendors/') {
+      return {
+        data: {
+          success: true,
+          data: { items: vendorItems, total: vendorItems.length },
+        },
       }
-    )
-    vi.spyOn(api, 'get').mockImplementation(async (url) => {
-      if (url === '/api/models/7') return detail
-      if (url === '/api/option/model_pricing') {
-        return {
-          data: {
-            success: true,
-            data: {
-              entries: [
-                {
-                  model_name: model.model_name,
-                  version: 'v1',
-                  configured: { ModelRatio: 3.25, CompletionRatio: 27 / 6.5 },
-                  effective: { ModelRatio: 3.25, CompletionRatio: 27 / 6.5 },
-                },
-              ],
-              options: pricingOptions({}),
-              empty_version: 'empty',
-            },
-          },
-        }
-      }
-      return { data: { success: true, data: { items: [] } } }
-    })
-    const client = renderModelActions()
-    const user = userEvent.setup()
-    await user.click(screen.getByRole('button', { name: 'Pricing' }))
-    expect(screen.getByRole('tab', { name: 'Pricing' })).toHaveAttribute(
-      'aria-selected',
-      'true'
-    )
-    await act(async () =>
-      resolveDetail({ data: { success: true, data: model } })
-    )
-    expect(screen.getByRole('tab', { name: 'Pricing' })).toHaveAttribute(
-      'aria-selected',
-      'true'
-    )
-    expect(
-      await screen.findByRole('textbox', { name: 'Input price' })
-    ).toHaveValue('6.5')
-    expect(
-      screen.queryByRole('heading', { name: 'Edit model pricing' })
-    ).not.toBeInTheDocument()
-    expect(
-      screen.queryByRole('textbox', { name: 'Model name' })
-    ).not.toBeInTheDocument()
-    expect(screen.getByRole('complementary', { name: 'Preview' })).toBeVisible()
-    for (const tab of ['Model metadata', 'Channels and groups', 'Pricing']) {
-      expect(screen.getByRole('tab', { name: tab })).toHaveClass(
-        'min-w-0',
-        'whitespace-normal'
-      )
-      await user.click(screen.getByRole('tab', { name: tab }))
-      expect(
-        screen.getByRole('dialog', { name: model.model_name })
-      ).toHaveClass('sm:max-w-[1280px]')
     }
-    await user.click(screen.getByRole('button', { name: 'Close' }))
-    await user.click(screen.getByRole('button', { name: 'Edit' }))
-    expect(await screen.findByLabelText('Description')).toHaveValue('Original')
-    expect(screen.getByRole('tab', { name: 'Model metadata' })).toHaveAttribute(
-      'aria-selected',
-      'true'
-    )
-    client.clear()
+    return { data: { success: true, data: { items: [] } } }
   })
+}
 
-  it('does not expose a pricing shortcut to an ordinary administrator', () => {
-    vi.spyOn(api, 'get').mockResolvedValue({
-      data: { success: true, data: { items: [] } },
-    })
-    const client = renderModelActions(model, 10)
+describe('row actions', () => {
+  it('offers edit, visibility toggle and delete without a pricing entry', async () => {
+    mockReferenceData(() => undefined)
+    renderModelActions()
+    const user = userEvent.setup()
     expect(screen.getByRole('button', { name: 'Edit' })).toBeVisible()
     expect(
       screen.queryByRole('button', { name: 'Pricing' })
     ).not.toBeInTheDocument()
-    client.clear()
+    await user.click(screen.getByRole('button', { name: 'Open menu' }))
+    expect(
+      await screen.findByRole('menuitem', { name: 'Hide from model square' })
+    ).toBeVisible()
+    expect(screen.getByRole('menuitem', { name: 'Delete' })).toBeVisible()
   })
 
-  it('requires a concrete model for matching rules and protects an unsaved price on close', async () => {
-    const matchedModel = {
-      ...model,
-      name_rule: 1,
-      matched_models: ['example-concrete'],
-    }
-    const get = vi.spyOn(api, 'get').mockImplementation(async (url) => {
-      if (url === '/api/models/7') {
-        return { data: { success: true, data: matchedModel } }
-      }
-      if (url === '/api/option/model_pricing') {
-        return {
-          data: {
-            success: true,
-            data: {
-              entries: [
-                {
-                  model_name: 'example-concrete',
-                  version: 'v1',
-                  configured: { ModelPrice: 1.5 },
-                  effective: { ModelPrice: 1.5 },
-                },
-              ],
-              options: pricingOptions({}),
-              empty_version: 'empty',
-            },
-          },
-        }
-      }
-      return { data: { success: true, data: { items: [] } } }
-    })
-    const client = renderModelActions(matchedModel)
-    const user = userEvent.setup()
-    await user.click(screen.getByRole('button', { name: 'Pricing' }))
-    await user.click(
-      await screen.findByRole('combobox', { name: 'Select model' })
-    )
+  it('offers only metadata creation for a channel model', () => {
+    mockReferenceData(() => undefined)
+    renderModelActions({ ...model, id: 0, model_name: 'channel-only' })
+    expect(screen.getByRole('button', { name: 'Add metadata' })).toBeVisible()
     expect(
-      get.mock.calls.some(([url]) => url === '/api/option/model_pricing')
-    ).toBe(false)
-    await user.click(
-      await screen.findByRole('option', { name: 'example-concrete' })
-    )
-    const price = await screen.findByPlaceholderText('0.01')
-    await waitFor(() => expect(price).toHaveValue('1.5'))
-    await user.clear(price)
-    await user.type(price, '2')
-    await user.click(screen.getByRole('button', { name: 'Close' }))
-    expect(await screen.findByRole('alertdialog')).toHaveTextContent(
-      'Discard unsaved changes?'
-    )
-    await user.click(screen.getByRole('button', { name: 'Cancel' }))
-    expect(price).toHaveValue('2')
-    client.clear()
+      screen.queryByRole('button', { name: 'Open menu' })
+    ).not.toBeInTheDocument()
   })
 })
 
 describe('metadata editing', () => {
+  it('limits the editor to the metadata and connections tabs', async () => {
+    mockReferenceData((url) =>
+      url === '/api/models/7'
+        ? { success: true, data: model }
+        : undefined
+    )
+    renderDrawer(model)
+    await screen.findByLabelText('Description')
+    const user = userEvent.setup()
+    const tabs = screen.getAllByRole('tab')
+    expect(tabs.map((tab) => tab.textContent)).toEqual([
+      'Model metadata',
+      'Channels and groups',
+    ])
+    await user.click(screen.getByRole('tab', { name: 'Channels and groups' }))
+    expect(
+      screen.queryByRole('textbox', { name: 'Model Name *' })
+    ).not.toBeInTheDocument()
+  })
+
   it.each([
     {
       name: 'business rejection',
@@ -305,9 +172,7 @@ describe('metadata editing', () => {
       useAuthStore
         .getState()
         .auth.setUser({ id: 2, username: 'admin', role: 10 })
-      vi.spyOn(api, 'get').mockResolvedValue({
-        data: { success: true, data: { items: [] } },
-      })
+      mockReferenceData(() => undefined)
       const post = vi.spyOn(api, 'post')
       if (response) {
         post.mockResolvedValueOnce({ data: response })
@@ -458,43 +323,20 @@ describe('metadata editing', () => {
     }
   )
 
-  it('allows an administrator to save metadata without loading or changing system pricing', async () => {
+  it('saves every writable metadata field through /api/models only', async () => {
     useAuthStore.getState().auth.setUser({ id: 2, username: 'admin', role: 10 })
-    const get = vi.spyOn(api, 'get').mockImplementation(async (url) => {
-      if (url === '/api/models/7') {
-        return { data: { success: true, data: model } }
-      }
-      if (url === '/api/vendors/') {
-        return {
-          data: {
-            success: true,
-            data: {
-              items: [
-                { id: 3, name: 'Existing vendor', icon: 'Gemini.Color' },
-                { id: 4, name: 'Another vendor', icon: 'Gemini.Color' },
-              ],
-            },
-          },
-        }
-      }
-      return { data: { success: false, message: 'Root only' } }
-    })
+    const get = mockReferenceData(
+      (url) =>
+        url === '/api/models/7' ? { success: true, data: model } : undefined,
+      [
+        { id: 3, name: 'Existing vendor', icon: 'Gemini.Color' },
+        { id: 4, name: 'Another vendor', icon: 'Gemini.Color' },
+      ]
+    )
     const put = vi
       .spyOn(api, 'put')
       .mockResolvedValue({ data: { success: true, data: model } })
-    const client = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-        mutations: { retry: false },
-      },
-    })
-    render(
-      <QueryClientProvider client={client}>
-        <ModelsProvider>
-          <ModelMutateDrawer open onOpenChange={() => {}} currentRow={model} />
-        </ModelsProvider>
-      </QueryClientProvider>
-    )
+    renderDrawer(model)
     const description = await screen.findByLabelText('Description')
     await waitFor(() => expect(description).toHaveValue('Original'))
     expect(screen.getByRole('combobox', { name: 'Vendor' })).toHaveValue(
@@ -525,142 +367,45 @@ describe('metadata editing', () => {
       screen.getByRole('button', { name: /Update Model|Save metadata/ })
     )
     await waitFor(() => expect(put).toHaveBeenCalled())
-    expect(
-      get.mock.calls.some(([url]) => String(url).startsWith('/api/option'))
-    ).toBe(false)
     expect(put.mock.calls.every(([url]) => url === '/api/models/')).toBe(true)
+    expect(get.mock.calls.every(([url]) => url !== '/api/models/')).toBe(true)
     expect(put.mock.calls[0][1]).toMatchObject({
       description: 'Updated metadata',
       icon: '',
       model_name: 'example-model',
       vendor_id: 4,
       endpoints: '',
+      status: 1,
+      sync_official: 1,
     })
   })
-  it('keeps metadata drafts while saving pricing independently and preserves the price draft across tabs', async () => {
-    useAuthStore.getState().auth.setUser({ id: 1, username: 'root', role: 100 })
-    let version = 'v1'
-    let storedPrice = 1.5
-    const get = vi.spyOn(api, 'get').mockImplementation(async (url) => {
-      if (url === '/api/models/7') {
-        return { data: { success: true, data: model } }
-      }
-      if (url === '/api/vendors/') {
-        return {
-          data: {
-            success: true,
-            data: {
-              items: [{ id: 3, name: 'Existing vendor', icon: 'Gemini.Color' }],
-            },
-          },
-        }
-      }
-      if (url === '/api/option/model_pricing') {
-        return {
-          data: {
-            success: true,
-            data: {
-              entries: [
-                {
-                  model_name: model.model_name,
-                  version,
-                  configured: { ModelPrice: storedPrice },
-                  effective: { ModelPrice: storedPrice },
-                },
-              ],
-              options: pricingOptions({ ModelPrice: '{"example-model":1.5}' }),
-              empty_version: 'empty',
-            },
-          },
-        }
-      }
-      return { data: { success: true, data: [], vendors: [] } }
-    })
+
+  it('writes the display policy and sync policy switches back to the server', async () => {
+    mockReferenceData((url) =>
+      url === '/api/models/7' ? { success: true, data: model } : undefined
+    )
     const put = vi
       .spyOn(api, 'put')
       .mockResolvedValue({ data: { success: true, data: model } })
-    const patch = vi
-      .spyOn(api, 'patch')
-      .mockResolvedValueOnce({
-        data: {
-          success: false,
-          message: 'Model pricing changed; reload before saving',
-        },
-      })
-      .mockResolvedValue({ data: { success: true } })
-    const client = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-        mutations: { retry: false },
-      },
-    })
-    render(
-      <QueryClientProvider client={client}>
-        <ModelsProvider>
-          <ModelMutateDrawer open onOpenChange={() => {}} currentRow={model} />
-        </ModelsProvider>
-      </QueryClientProvider>
-    )
-    const description = await screen.findByLabelText('Description')
-    await waitFor(() => expect(description).toHaveValue('Original'))
+    renderDrawer(model)
+    await screen.findByLabelText('Description')
     const user = userEvent.setup()
-    await user.clear(description)
-    await user.type(description, 'Unsaved metadata draft')
-    await user.click(screen.getByRole('tab', { name: 'Pricing' }))
-    const price = await screen.findByPlaceholderText('0.01')
-    await waitFor(() => expect(price).toHaveValue('1.5'))
-    await user.clear(price)
-    await user.type(price, '0')
-    await user.click(screen.getByRole('tab', { name: 'Model metadata' }))
-    expect(screen.getByLabelText('Description')).toHaveValue(
-      'Unsaved metadata draft'
-    )
-    await user.click(screen.getByRole('tab', { name: 'Pricing' }))
-    expect(screen.getByPlaceholderText('0.01')).toHaveValue('0')
-    await user.click(screen.getByRole('button', { name: 'Save model prices' }))
-    await waitFor(() =>
-      expect(patch).toHaveBeenCalledWith('/api/option/model_pricing', {
-        changes: [
-          {
-            model_name: 'example-model',
-            expected_version: 'v1',
-            pricing: { ModelPrice: 0, 'billing_setting.billing_mode': 'ratio' },
-            reset: false,
-          },
-        ],
-      })
-    )
-    version = 'v2'
-    storedPrice = 2
-    await user.click(
-      await screen.findByRole('button', { name: 'Reload pricing' })
-    )
-    await waitFor(() =>
-      expect(screen.getByPlaceholderText('0.01')).toHaveValue('2')
-    )
-    await user.clear(screen.getByPlaceholderText('0.01'))
-    await user.type(screen.getByPlaceholderText('0.01'), '0')
-    await user.click(screen.getByRole('button', { name: 'Save model prices' }))
-    await waitFor(() =>
-      expect(patch).toHaveBeenLastCalledWith('/api/option/model_pricing', {
-        changes: [
-          {
-            model_name: 'example-model',
-            expected_version: 'v2',
-            pricing: { ModelPrice: 0, 'billing_setting.billing_mode': 'ratio' },
-            reset: false,
-          },
-        ],
-      })
-    )
-    expect(put).not.toHaveBeenCalled()
     expect(
-      get.mock.calls.some(([url]) => url === '/api/option/model_pricing')
-    ).toBe(true)
-    await user.click(screen.getByRole('tab', { name: 'Model metadata' }))
-    expect(screen.getByLabelText('Description')).toHaveValue(
-      'Unsaved metadata draft'
+      screen.getByRole('switch', { name: 'Model square visibility' })
+    ).toBeChecked()
+    expect(
+      screen.getByRole('switch', { name: 'Allow metadata sync' })
+    ).toBeChecked()
+    await user.click(
+      screen.getByRole('switch', { name: 'Model square visibility' })
     )
-    client.clear()
+    await user.click(screen.getByRole('switch', { name: 'Allow metadata sync' }))
+    await user.click(screen.getByRole('button', { name: 'Save metadata' }))
+    await waitFor(() => expect(put).toHaveBeenCalled())
+    expect(put.mock.calls[0][1]).toMatchObject({
+      id: 7,
+      status: 0,
+      sync_official: 0,
+    })
   })
 })

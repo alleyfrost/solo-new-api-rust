@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { AxiosError } from 'axios'
 import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -31,6 +32,7 @@ const models = [
   { id: 7, model_name: 'example-model', name_rule: 0 },
   { id: 8, model_name: 'another-model', name_rule: 0 },
 ]
+
 function Fixture(props: { batch?: boolean; onSuccess?: () => void }) {
   const [open, setOpen] = useState(true)
   return (
@@ -48,6 +50,7 @@ function Fixture(props: { batch?: boolean; onSuccess?: () => void }) {
     </>
   )
 }
+
 function mount(batch = false) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -61,78 +64,89 @@ function mount(batch = false) {
   )
   return { onSuccess, invalidate }
 }
+
 afterEach(() => {
   cleanup()
+  vi.restoreAllMocks()
   useAuthStore.getState().auth.reset()
 })
 
 describe('model deletion', () => {
-  it('defaults to keeping channels and resets the option after cancelling', async () => {
+  it('asks for a plain confirmation without channel or pricing options', () => {
+    vi.spyOn(api, 'delete').mockResolvedValue({ data: { success: true } })
+    mount()
+    expect(screen.getByRole('button', { name: 'Delete' })).toBeEnabled()
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+  })
+
+  it('deletes one model through DELETE /api/models/{id} and refreshes model data', async () => {
     const remove = vi.spyOn(api, 'delete').mockResolvedValue({
-      data: {
-        success: true,
-        data: { deleted_count: 1, updated_channels: 0 },
-      },
+      data: { success: true, data: { deleted: 1, unbound: 0 } },
     })
     const { onSuccess, invalidate } = mount()
     const user = userEvent.setup()
-    expect(
-      screen.getByRole('checkbox', { name: 'Also remove from all channels' })
-    ).not.toBeChecked()
-    await user.click(
-      screen.getByRole('checkbox', { name: 'Also remove from all channels' })
-    )
-    await user.click(screen.getByRole('button', { name: 'Cancel' }))
-    expect(remove).not.toHaveBeenCalled()
-    await user.click(screen.getByRole('button', { name: 'Open deletion' }))
-    expect(
-      screen.getByRole('checkbox', { name: 'Also remove from all channels' })
-    ).not.toBeChecked()
     await user.click(screen.getByRole('button', { name: 'Delete' }))
     await waitFor(() => expect(onSuccess).toHaveBeenCalledOnce())
-    expect(remove).toHaveBeenCalledWith('/api/models/7', {
-      params: { remove_from_channels: false, remove_pricing: false },
-    })
-    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ['channels'] })
+    expect(remove).toHaveBeenCalledWith('/api/models/7')
+    expect(remove).toHaveBeenCalledTimes(1)
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['models'] })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['vendors'] })
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
   })
 
-  it('submits one batch with channel removal and preserves selection after failure for retry', async () => {
-    const post = vi
-      .spyOn(api, 'post')
-      .mockResolvedValueOnce({
-        data: { success: false, message: 'Channel update failed' },
-      })
-      .mockResolvedValue({
-        data: {
-          success: true,
-          data: { deleted_count: 2, updated_channels: 3 },
-        },
-      })
-    const { onSuccess, invalidate } = mount(true)
+  it('sends one request per model for a batch selection', async () => {
+    const remove = vi.spyOn(api, 'delete').mockResolvedValue({
+      data: { success: true, data: { deleted: 1, unbound: 0 } },
+    })
+    const { onSuccess } = mount(true)
     const user = userEvent.setup()
-    await user.click(
-      screen.getByRole('checkbox', { name: 'Also remove from all channels' })
-    )
-    await user.click(screen.getByRole('button', { name: 'Delete' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Channel update failed'
-    )
-    expect(onSuccess).not.toHaveBeenCalled()
-    expect(
-      screen.getByRole('checkbox', { name: 'Also remove from all channels' })
-    ).toBeChecked()
     await user.click(screen.getByRole('button', { name: 'Delete' }))
     await waitFor(() => expect(onSuccess).toHaveBeenCalledOnce())
-    expect(post).toHaveBeenLastCalledWith('/api/models/delete', {
-      model_ids: [7, 8],
-      remove_from_channels: true,
-      remove_pricing: false,
-    })
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['channels'] })
+    expect(remove).toHaveBeenCalledWith('/api/models/7')
+    expect(remove).toHaveBeenCalledWith('/api/models/8')
+    expect(remove).toHaveBeenCalledTimes(2)
   })
 
-  it('disables dismissal and repeated submission while a single removal is pending', async () => {
+  it.each([
+    {
+      name: 'business rejection',
+      response: { success: false, message: '模型不存在' },
+    },
+    { name: 'HTTP rejection', response: null },
+  ])(
+    'shows the server reason for a $name and keeps the dialog open for retry',
+    async ({ response }) => {
+      const remove = vi.spyOn(api, 'delete')
+      if (response) {
+        remove.mockResolvedValue({ data: response })
+      } else {
+        const error = new AxiosError('Request failed with status code 409')
+        error.response = {
+          data: { message: '模型不存在' },
+          status: 409,
+          statusText: 'Conflict',
+          headers: {},
+          config: { headers: {} },
+        } as typeof error.response
+        remove.mockRejectedValue(error)
+      }
+      const { onSuccess } = mount()
+      const user = userEvent.setup()
+      await user.click(screen.getByRole('button', { name: 'Delete' }))
+      expect(await screen.findByRole('alert')).toHaveTextContent('模型不存在')
+      expect(onSuccess).not.toHaveBeenCalled()
+      expect(screen.getByRole('alertdialog')).toBeVisible()
+
+      remove.mockResolvedValue({
+        data: { success: true, data: { deleted: 1, unbound: 0 } },
+      })
+      await user.click(screen.getByRole('button', { name: 'Delete' }))
+      await waitFor(() => expect(onSuccess).toHaveBeenCalledOnce())
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    }
+  )
+
+  it('disables dismissal and repeated submission while a removal is pending', async () => {
     let complete!: (response: unknown) => void
     const remove = vi.spyOn(api, 'delete').mockImplementation(
       () =>
@@ -142,86 +156,13 @@ describe('model deletion', () => {
     )
     const { onSuccess } = mount()
     const user = userEvent.setup()
-    await user.click(
-      screen.getByRole('checkbox', { name: 'Also remove from all channels' })
-    )
     await user.click(screen.getByRole('button', { name: 'Delete' }))
     expect(screen.getByRole('button', { name: 'Delete' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled()
-    expect(
-      screen.getByRole('checkbox', { name: 'Also remove from all channels' })
-    ).toHaveAttribute('aria-disabled', 'true')
     await user.keyboard('{Escape}')
     expect(screen.getByRole('alertdialog')).toBeVisible()
     expect(remove).toHaveBeenCalledTimes(1)
-    expect(remove).toHaveBeenCalledWith('/api/models/7', {
-      params: { remove_from_channels: true, remove_pricing: false },
-    })
-    complete({
-      data: { success: true, data: { deleted_count: 1, updated_channels: 2 } },
-    })
+    complete({ data: { success: true, data: { deleted: 1, unbound: 0 } } })
     await waitFor(() => expect(onSuccess).toHaveBeenCalledOnce())
   })
 })
-
-it('lets a super administrator remove pricing independently of channel removal', async () => {
-  useAuthStore.getState().auth.setUser({ id: 1, username: 'root', role: 100 })
-  const post = vi.spyOn(api, 'post').mockResolvedValue({
-    data: { success: true, data: { deleted_count: 2, updated_channels: 0 } },
-  })
-  const { onSuccess, invalidate } = mount(true)
-  const user = userEvent.setup()
-  expect(
-    screen.getByRole('checkbox', { name: 'Also remove pricing' })
-  ).not.toBeChecked()
-  await user.click(
-    screen.getByRole('checkbox', { name: 'Also remove pricing' })
-  )
-  expect(
-    screen.getByText(/Built-in pricing may become effective again/)
-  ).toBeVisible()
-  expect(screen.queryByText(/Pricing will be retained/)).not.toBeInTheDocument()
-  await user.click(screen.getByRole('button', { name: 'Delete' }))
-  await waitFor(() => expect(onSuccess).toHaveBeenCalledOnce())
-  expect(post).toHaveBeenCalledWith('/api/models/delete', {
-    model_ids: [7, 8],
-    remove_from_channels: false,
-    remove_pricing: true,
-  })
-  expect(invalidate).toHaveBeenCalledWith({
-    queryKey: ['model-pricing-config'],
-  })
-  expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ['channels'] })
-})
-
-it('keeps pricing removal unavailable to an ordinary administrator', () => {
-  useAuthStore.getState().auth.setUser({ id: 2, username: 'admin', role: 10 })
-  mount()
-  expect(
-    screen.getByRole('checkbox', { name: 'Also remove pricing' })
-  ).toHaveAttribute('aria-disabled', 'true')
-  expect(
-    screen.getByText('Model pricing is managed by a super administrator.')
-  ).toBeVisible()
-})
-
-it.each([1, 2, 3])(
-  'disables channel removal when selection includes matching rule %i',
-  (rule) => {
-    const client = new QueryClient({
-      defaultOptions: { mutations: { retry: false } },
-    })
-    render(
-      <QueryClientProvider client={client}>
-        <ModelDeleteDialog
-          models={[models[1], { ...models[0], name_rule: rule }]}
-          onClose={() => {}}
-        />
-      </QueryClientProvider>
-    )
-    expect(
-      screen.getByRole('checkbox', { name: /Also remove from all channels/ })
-    ).toHaveAttribute('aria-disabled', 'true')
-    expect(screen.getByText('Only available for exact matching')).toBeVisible()
-  }
-)

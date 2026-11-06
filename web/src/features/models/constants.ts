@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import type { TFunction } from 'i18next'
 
-import type { NameRule, ModelStatus, SyncSource } from './types'
+import type { NameRule, ModelStatus } from './types'
 
 // ============================================================================
 // Pagination
@@ -100,59 +100,6 @@ export function getSyncStatusOptions(t: TFunction) {
 }
 
 // ============================================================================
-// Deployment Status
-// ============================================================================
-
-export function getDeploymentStatusOptions(t: TFunction) {
-  return [
-    { label: t('All Status'), value: 'all' },
-    { label: t('Running'), value: 'running' },
-    { label: t('Completed'), value: 'completed' },
-    { label: t('Failed'), value: 'failed' },
-    { label: t('Deployment requested'), value: 'deployment requested' },
-    { label: t('Termination requested'), value: 'termination requested' },
-    { label: t('Destroyed'), value: 'destroyed' },
-  ] as const
-}
-
-export function getDeploymentStatusConfig(t: TFunction): Record<
-  string,
-  {
-    label: string
-    variant: 'success' | 'neutral' | 'warning' | 'danger'
-  }
-> {
-  return {
-    running: { label: t('Running'), variant: 'success' },
-    completed: { label: t('Completed'), variant: 'success' },
-    failed: { label: t('Failed'), variant: 'danger' },
-    error: { label: t('Failed'), variant: 'danger' },
-    destroyed: { label: t('Destroyed'), variant: 'danger' },
-    'deployment requested': {
-      label: t('Deployment requested'),
-      variant: 'warning',
-    },
-    'termination requested': {
-      label: t('Termination requested'),
-      variant: 'warning',
-    },
-  }
-}
-
-// ============================================================================
-// Quota Type
-// ============================================================================
-
-export function getQuotaTypeConfig(
-  t: TFunction
-): Record<number, { label: string; color: string }> {
-  return {
-    0: { label: t('Usage-based'), color: 'violet' },
-    1: { label: t('Per-call'), color: 'teal' },
-  }
-}
-
-// ============================================================================
 // Endpoint Templates
 // ============================================================================
 
@@ -167,27 +114,4 @@ export const ENDPOINT_TEMPLATES: Record<
   'jina-rerank': { path: '/rerank', method: 'POST' },
   'image-generation': { path: '/v1/images/generations', method: 'POST' },
   embeddings: { path: '/v1/embeddings', method: 'POST' },
-}
-
-// ============================================================================
-// Sync Locale Options
-// ============================================================================
-
-export function getSyncLocaleOptions(t: TFunction) {
-  return [
-    { label: t('Chinese'), value: 'zh' },
-    { label: t('English'), value: 'en' },
-    { label: t('Japanese'), value: 'ja' },
-  ] as const
-}
-
-export function getSyncSourceOptions(t: TFunction) {
-  return [
-    {
-      label: t('Official Repository'),
-      value: 'official' as SyncSource,
-      description: t('Sync from the public upstream metadata repository.'),
-      disabled: false,
-    },
-  ] as const
 }

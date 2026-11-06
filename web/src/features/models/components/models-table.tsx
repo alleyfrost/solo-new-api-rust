@@ -23,7 +23,6 @@ import { useTranslation } from 'react-i18next'
 
 import { DataTablePage, useDataTable } from '@/components/data-table'
 import { ErrorState } from '@/components/error-state'
-import { useModelPricing } from '@/features/model-pricing/api'
 import { useMediaQuery } from '@/hooks'
 import { useTableUrlState } from '@/hooks/use-table-url-state'
 import {
@@ -37,13 +36,11 @@ import { modelsQueryKeys, vendorsQueryKeys } from '../lib'
 import type { ModelSquareState } from '../types'
 import { DataTableBulkActions } from './data-table-bulk-actions'
 import { useModelsColumns } from './models-columns'
-import { useModels } from './models-provider'
 
 const route = getRouteApi('/_authenticated/models/$section')
 
 export function ModelsTable() {
   const { t } = useTranslation()
-  const { selectedVendor } = useModels()
   const isMobile = useMediaQuery('(max-width: 640px)')
 
   // URL state management
@@ -104,12 +101,11 @@ export function ModelsTable() {
     }))
   }, [vendors])
 
-  // Apply selected vendor from context or filter
+  // Vendor filter comes from the URL column filter only
   const activeVendorFilter =
-    selectedVendor ||
-    (vendorFilter.length > 0 && !vendorFilter.includes('all')
+    vendorFilter.length > 0 && !vendorFilter.includes('all')
       ? vendorFilter[0]
-      : undefined)
+      : undefined
 
   const statusFilterValue =
     statusFilter.length > 0 && !statusFilter.includes('all')
@@ -172,16 +168,7 @@ export function ModelsTable() {
   const vendorCounts = data?.data?.vendor_counts
 
   // Columns configuration
-  const pricingQuery = useModelPricing(
-    models
-      .filter((item) => item.name_rule === 0)
-      .map((item) => item.model_name),
-    models.length > 0
-  )
-  let pricingState: 'loading' | 'error' | undefined
-  if (pricingQuery.isError) pricingState = 'error'
-  else if (pricingQuery.isLoading) pricingState = 'loading'
-  const columns = useModelsColumns(vendors, pricingQuery.data, pricingState)
+  const columns = useModelsColumns(vendors)
 
   // React Table instance
   const { table } = useDataTable({

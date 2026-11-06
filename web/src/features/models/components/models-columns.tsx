@@ -30,12 +30,6 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from '@/components/ui/tooltip'
-import {
-  useCanEditModelPricing,
-  type ModelPricingConfig,
-} from '@/features/model-pricing/api'
-import { modelPricingDisplay } from '@/features/model-pricing/pricing'
-import { ModelPriceCell } from '@/features/pricing/components/model-price-cell'
 import { formatTimestampToDate } from '@/lib/format'
 import { getLobeIcon } from '@/lib/lobe-icon'
 
@@ -51,21 +45,13 @@ import { useModels } from './models-provider'
 const EMPTY_VENDORS: Vendor[] = []
 
 export function useModelsColumns(
-  vendors: Vendor[] = EMPTY_VENDORS,
-  pricing?: ModelPricingConfig,
-  pricingState?: 'loading' | 'error'
+  vendors: Vendor[] = EMPTY_VENDORS
 ): ColumnDef<Model>[] {
   const { t } = useTranslation()
-  const canPrice = useCanEditModelPricing()
   const { setCurrentRow, setOpen } = useModels()
   const vendorMap = useMemo(
     () => new Map(vendors.map((vendor) => [vendor.id, vendor])),
     [vendors]
-  )
-  const priceMap = useMemo(
-    () =>
-      new Map(pricing?.entries.map((entry) => [entry.model_name, entry]) ?? []),
-    [pricing]
   )
   return useMemo<ColumnDef<Model>[]>(() => {
     const rules = getNameRuleConfig(t)
@@ -142,63 +128,6 @@ export function useModelsColumns(
                 </div>
               </div>
             </div>
-          )
-        },
-      },
-      {
-        id: 'pricing',
-        header: t('Pricing'),
-        meta: { label: t('Pricing') },
-        size: 225,
-        enableSorting: false,
-        cell: ({ row }) => {
-          if (!canPrice) {
-            return (
-              <span className='text-muted-foreground text-xs'>
-                {t('Super admin')}
-              </span>
-            )
-          }
-          if (row.original.name_rule !== 0) {
-            return (
-              <span className='text-muted-foreground text-xs'>
-                {t('Per matched model')}
-              </span>
-            )
-          }
-          if (pricingState) {
-            return (
-              <span className='text-muted-foreground text-xs'>
-                {pricingState === 'error'
-                  ? t('Failed to load model pricing')
-                  : t('Loading...')}
-              </span>
-            )
-          }
-          const entry = priceMap.get(row.original.model_name)
-          return (
-            <Button
-              variant='ghost'
-              className='h-auto w-full max-w-full min-w-0 justify-start px-0 py-1 text-left font-normal hover:bg-transparent'
-              aria-label={t('View pricing for {{model}}', {
-                model: row.original.model_name,
-              })}
-              onClick={() => {
-                setCurrentRow(row.original)
-                setOpen('price-model')
-              }}
-            >
-              <ModelPriceCell
-                model={modelPricingDisplay(
-                  entry ?? {
-                    model_name: row.original.model_name,
-                    effective: {},
-                  }
-                )}
-                options={{ tokenUnit: 'M' }}
-                showExpression={false}
-              />
-            </Button>
           )
         },
       },
@@ -284,7 +213,7 @@ export function useModelsColumns(
         header: t('Actions'),
         enableSorting: false,
         enableHiding: false,
-        size: canPrice ? 170 : 105,
+        size: 105,
         cell: ({ row }) => <DataTableRowActions row={row} />,
       },
       {
@@ -379,5 +308,5 @@ export function useModelsColumns(
         meta: { mobileHidden: true },
       },
     ]
-  }, [t, canPrice, vendorMap, priceMap, pricingState, setCurrentRow, setOpen])
+  }, [t, vendorMap, setCurrentRow, setOpen])
 }
