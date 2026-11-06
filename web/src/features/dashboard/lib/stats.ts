@@ -33,7 +33,7 @@ export function safeDivide(
 }
 
 /**
- * Calculate aggregated statistics from quota data
+ * Calculate aggregated usage statistics (request counts and tokens)
  */
 export function calculateDashboardStats(data: QuotaDataItem[]) {
   return data.reduce(
@@ -41,7 +41,6 @@ export function calculateDashboardStats(data: QuotaDataItem[]) {
       const cacheRead = item.cache_read_tokens ?? 0
       const cacheCreation = item.cache_creation_tokens ?? 0
       return {
-        totalQuota: acc.totalQuota + (Number(item.quota) || 0),
         totalCount: acc.totalCount + (Number(item.count) || 0),
         totalTokens: acc.totalTokens + (Number(item.token_used) || 0),
         totalCacheReadTokens:
@@ -53,7 +52,6 @@ export function calculateDashboardStats(data: QuotaDataItem[]) {
       }
     },
     {
-      totalQuota: 0,
       totalCount: 0,
       totalTokens: 0,
       totalCacheReadTokens: 0,

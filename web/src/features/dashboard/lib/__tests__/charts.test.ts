@@ -82,14 +82,14 @@ function unorderedUsage(start: string, interval: number): QuotaDataItem[] {
     created_at: first + i * interval,
     model_name: 'model-a',
     username: 'alice',
-    quota: (i + 1) * 500000,
+    token_used: i + 1,
     count: i + 1,
   }))
   // Same hour, or a second hourly record within the same day/week label.
   const duplicate = {
     ...rows[0],
     created_at: first + (interval === 3600 ? 0 : 3600),
-    quota: 5000000,
+    token_used: 10,
     count: 10,
   }
   return [
@@ -112,12 +112,12 @@ describe.each(cases)('dashboard $granularity chart chronology', (scenario) => {
     const result = processChartData(data, scenario.granularity)
 
     for (const key of ['spec_line', 'spec_area', 'spec_model_line'] as const) {
-      const values: Array<{ Time: string; rawQuota: number; Count: number }> =
+      const values: Array<{ Time: string; rawTokens: number; Count: number }> =
         result[key].data[0].values
       expect(values.map((row) => row.Time)).toEqual(scenario.labels)
       expect(
         values.map((row) =>
-          key === 'spec_model_line' ? row.Count : row.rawQuota / 500000
+          key === 'spec_model_line' ? row.Count : row.rawTokens
         )
       ).toEqual([11, 2, 3, 4, 5, 6, 7, 8])
     }
@@ -128,11 +128,11 @@ describe.each(cases)('dashboard $granularity chart chronology', (scenario) => {
     const data = unorderedUsage(scenario.start, scenario.interval)
     const original = structuredClone(data)
     const result = processUserChartData(data, scenario.granularity)
-    const values: Array<{ Time: string; rawQuota: number }> =
+    const values: Array<{ Time: string; rawTokens: number }> =
       result.spec_user_trend.data[0].values
 
     expect(values.map((row) => row.Time)).toEqual(scenario.labels)
-    expect(values.map((row) => row.rawQuota / 500000)).toEqual([
+    expect(values.map((row) => row.rawTokens)).toEqual([
       11, 2, 3, 4, 5, 6, 7, 8,
     ])
     expect(data).toEqual(original)
@@ -143,12 +143,12 @@ describe.each(cases)('dashboard $granularity chart chronology', (scenario) => {
     const result = processChartData(data, scenario.granularity)
 
     for (const key of ['spec_line', 'spec_area', 'spec_model_line'] as const) {
-      const values: Array<{ Time: string; rawQuota: number; Count: number }> =
+      const values: Array<{ Time: string; rawTokens: number; Count: number }> =
         result[key].data[0].values
       expect(values.map((row) => row.Time)).toEqual(scenario.labels.slice(1))
       expect(
         values.map((row) =>
-          key === 'spec_model_line' ? row.Count : row.rawQuota / 500000
+          key === 'spec_model_line' ? row.Count : row.rawTokens
         )
       ).toEqual([0, 0, 0, 0, 0, 0, 8])
     }

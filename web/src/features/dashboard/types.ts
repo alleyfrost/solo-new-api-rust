@@ -19,7 +19,9 @@ For commercial licensing, please contact support@quantumnous.com
 import type { TimeGranularity } from '@/lib/time'
 
 // ============================================================================
-// Quota & Usage Data Types
+// Usage Data Types
+//
+// 该部署只记用量不记金额：后端 quota 字段恒为 0，前端不再建模金额口径。
 // ============================================================================
 
 export interface QuotaDataItem {
@@ -32,7 +34,6 @@ export interface QuotaDataItem {
   cache_creation_tokens?: number
   token_used?: number
   count?: number
-  quota?: number
 }
 
 export interface FlowQuotaDataItem {
@@ -47,10 +48,9 @@ export interface FlowQuotaDataItem {
   model_name?: string
   token_used?: number
   count?: number
-  quota?: number
 }
 
-export type FlowMetric = 'quota' | 'tokens' | 'requests'
+export type FlowMetric = 'tokens' | 'requests'
 
 export type FlowOverflowMode = 'aggregate' | 'hide'
 
@@ -100,7 +100,6 @@ export interface DashboardFlowNode {
   kind: FlowNodeKind
   value: number
   requests: number
-  quota: number
   tokens: number
   color: string
   colorKey: string
@@ -113,7 +112,6 @@ export interface DashboardFlowLink {
   target: string
   value: number
   requests: number
-  quota: number
   tokens: number
   sourceLabel: string
   targetLabel: string
@@ -155,7 +153,6 @@ export interface FlowFilterOptions {
 }
 
 export interface FlowSummary {
-  quota: number
   tokens: number
   requests: number
 }
@@ -244,7 +241,7 @@ export interface ProcessedChartData {
   spec_area: VChartSpec
   spec_model_line: VChartSpec
   spec_rank_bar: VChartSpec
-  totalQuotaDisplay: string
+  totalTokensDisplay: string
   totalCountDisplay: string
 }
 

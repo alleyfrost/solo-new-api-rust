@@ -33,7 +33,7 @@ import type {
   DashboardFilters,
 } from '@/features/dashboard/types'
 import { toIntlLocale } from '@/i18n/languages'
-import { formatCompactNumber, formatNumber, formatQuota } from '@/lib/format'
+import { formatCompactNumber, formatNumber } from '@/lib/format'
 import { computeTimeRange } from '@/lib/time'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth-store'
@@ -115,7 +115,6 @@ export function LogStatCards(props: LogStatCardsProps) {
 
   const adaptedStats = {
     rpm: stats?.totalCount ?? 0,
-    quota: stats?.totalQuota ?? 0,
     tpm: stats?.totalTokens ?? 0,
     cacheRead: stats?.totalCacheReadTokens ?? 0,
     cacheCreation: stats?.totalCacheCreationTokens ?? 0,
@@ -124,13 +123,7 @@ export function LogStatCards(props: LogStatCardsProps) {
   const items = statCardsConfig.map((config) => {
     const rawValue = config.getValue(adaptedStats, timeRangeMinutes)
     const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
-    const formatted =
-      config.key === 'quota'
-        ? {
-            displayValue: formatQuota(rawValue),
-            fullValue: formatQuota(rawValue),
-          }
-        : formatStatNumber(rawValue, locale)
+    const formatted = formatStatNumber(rawValue, locale)
 
     return {
       key: config.key,
@@ -145,7 +138,7 @@ export function LogStatCards(props: LogStatCardsProps) {
 
   return (
     <div className='overflow-hidden rounded-lg border'>
-      <div className='divide-border/60 grid min-w-0 grid-cols-2 divide-x sm:grid-cols-3 lg:grid-cols-7'>
+      <div className='divide-border/60 grid min-w-0 grid-cols-2 divide-x sm:grid-cols-3 lg:grid-cols-6'>
         {items.map((it, idx) => {
           const Icon = it.icon
           let valueContent

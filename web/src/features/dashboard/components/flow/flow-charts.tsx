@@ -29,7 +29,6 @@ import {
   Info,
   Loader2,
   Route,
-  WalletCards,
 } from 'lucide-react'
 import {
   Fragment,
@@ -84,7 +83,6 @@ import type {
   FlowOverflowMode,
   FlowRole,
 } from '@/features/dashboard/types'
-import { formatQuota } from '@/lib/format'
 import { ROLE } from '@/lib/roles'
 import { requireServerSuccess } from '@/lib/server-error-message'
 import { useThemeColor } from '@/lib/theme-color'
@@ -103,13 +101,11 @@ interface FlowChartsProps {
 }
 
 const FLOW_METRIC_OPTIONS = [
-  { value: 'quota', labelKey: 'By quota', icon: WalletCards },
   { value: 'tokens', labelKey: 'By tokens', icon: Hash },
   { value: 'requests', labelKey: 'By requests', icon: Activity },
 ] as const
 
 const FLOW_METRIC_LABEL_KEYS: Record<FlowMetric, string> = {
-  quota: 'Quota',
   tokens: 'Tokens',
   requests: 'Requests',
 }
@@ -268,7 +264,7 @@ export function FlowCharts(props: FlowChartsProps) {
   } else if (isAdmin) {
     flowRole = 'admin'
   }
-  const [metric, setMetric] = useState<FlowMetric>('quota')
+  const [metric, setMetric] = useState<FlowMetric>('tokens')
   const [topNodeLimit, setTopNodeLimit] = useState(DEFAULT_FLOW_TOP_NODE_LIMIT)
   const [overflowMode, setOverflowMode] =
     useState<FlowOverflowMode>('aggregate')
@@ -396,11 +392,6 @@ export function FlowCharts(props: FlowChartsProps) {
     [flowData.filterOptions.nodes]
   )
   const metricLabel = t(FLOW_METRIC_LABEL_KEYS[metric])
-  const formatNodeMetricValue = useCallback(
-    (value: number) =>
-      metric === 'quota' ? formatQuota(value) : formatFlowMetricNumber(value),
-    [metric]
-  )
   // Explicit filters (the chips/dropdown control) narrow the rows that feed the
   // chart. They are intentionally independent from the click-to-highlight state
   // below so selecting a filter never dims a node, it removes unrelated rows.
@@ -461,9 +452,8 @@ export function FlowCharts(props: FlowChartsProps) {
       buildFlowSankeySpec(
         flowData.flow,
         chartTitle,
-        formatQuota,
+        formatFlowMetricNumber,
         {
-          quota: t('Quota'),
           tokens: t('Tokens'),
           requests: t('Requests'),
           share: t('Share'),
@@ -643,7 +633,7 @@ export function FlowCharts(props: FlowChartsProps) {
             stages={nodeFilterStages}
             stageLabels={FLOW_STAGE_LABEL_KEYS}
             metricLabel={metricLabel}
-            formatMetricValue={formatNodeMetricValue}
+            formatMetricValue={formatFlowMetricNumber}
             options={nodeFilterOptions}
             selectedNodes={selectedNodes}
             onToggleNode={toggleFlowNodeFilter}

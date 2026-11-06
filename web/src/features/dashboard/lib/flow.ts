@@ -39,13 +39,11 @@ import { getDashboardChartColors } from './charts'
 type VChartSpec = Record<string, any>
 
 type FlowMetrics = {
-  quota: number
   tokens: number
   requests: number
 }
 
 type FlowSankeyLabels = {
-  quota: string
   tokens: string
   requests: string
   share: string
@@ -92,7 +90,6 @@ const DEFAULT_FLOW_ROLE: FlowRole = 'user'
 const DEFAULT_FLOW_OVERFLOW_MODE: FlowOverflowMode = 'aggregate'
 
 const DEFAULT_FLOW_SANKEY_LABELS: FlowSankeyLabels = {
-  quota: 'Quota',
   tokens: 'Tokens',
   requests: 'Requests',
   share: 'Share',
@@ -159,16 +156,13 @@ function isFlowNodeKind(value: unknown): value is FlowNodeKind {
 
 function rowMetrics(row: FlowQuotaDataItem): FlowMetrics {
   return {
-    quota: numberValue(row.quota),
     tokens: numberValue(row.token_used),
     requests: numberValue(row.count),
   }
 }
 
 function metricValue(metrics: FlowMetrics, metric: FlowMetric): number {
-  if (metric === 'requests') return metrics.requests
-  if (metric === 'tokens') return metrics.tokens
-  return metrics.quota
+  return metric === 'requests' ? metrics.requests : metrics.tokens
 }
 
 function userNode(row: FlowQuotaDataItem): FlowPathNode {
@@ -427,14 +421,12 @@ function addNode(
     kind: pathNode.kind,
     value: 0,
     requests: 0,
-    quota: 0,
     tokens: 0,
     color,
     colorKey,
   }
   previous.value += metricValue(metrics, metric)
   previous.requests += metrics.requests
-  previous.quota += metrics.quota
   previous.tokens += metrics.tokens
   map.set(pathNode.id, previous)
 }
@@ -454,7 +446,6 @@ function addLink(
     target: target.id,
     value: 0,
     requests: 0,
-    quota: 0,
     tokens: 0,
     sourceLabel: source.label,
     targetLabel: target.label,
@@ -467,7 +458,6 @@ function addLink(
   }
   previous.value += metricValue(metrics, metric)
   previous.requests += metrics.requests
-  previous.quota += metrics.quota
   previous.tokens += metrics.tokens
   map.set(key, previous)
 }
@@ -528,13 +518,11 @@ function buildSummary(rows: FlowQuotaDataItem[]): FlowSummary {
   return rows.reduce<FlowSummary>(
     (summary, row) => {
       const metrics = rowMetrics(row)
-      summary.quota += metrics.quota
       summary.tokens += metrics.tokens
       summary.requests += metrics.requests
       return summary
     },
     {
-      quota: 0,
       tokens: 0,
       requests: 0,
     }
@@ -840,7 +828,7 @@ function formatNumber(value: number): string {
 
 function buildUserFilterOptions(
   rows: FlowQuotaDataItem[],
-  metric: FlowMetric = 'quota',
+  metric: FlowMetric = 'tokens',
   palette?: readonly string[]
 ): FlowFilterOptions['users'] {
   const users = new Map<
@@ -953,7 +941,7 @@ function buildNodeFilterOptions(
 
 export function buildFlowFilterOptions(
   rows: FlowQuotaDataItem[],
-  metric: FlowMetric = 'quota',
+  metric: FlowMetric = 'tokens',
   palette?: readonly string[],
   role: FlowRole = DEFAULT_FLOW_ROLE,
   visibleStages?: FlowNodeKind[],
@@ -975,7 +963,7 @@ export function buildFlowFilterOptions(
 
 export function buildDashboardFlowData(
   rows: FlowQuotaDataItem[],
-  metric: FlowMetric = 'quota',
+  metric: FlowMetric = 'tokens',
   options: FlowBuildOptions = {}
 ): ProcessedFlowData {
   const role = options.role ?? DEFAULT_FLOW_ROLE
@@ -1096,14 +1084,9 @@ function tooltipMetricLines(
 
   return [
     {
-      key: labels.quota,
-      value: (datum: Record<string, unknown>) =>
-        valueFormatter(metricValue(datum, 'quota')),
-    },
-    {
       key: labels.tokens,
       value: (datum: Record<string, unknown>) =>
-        formattedNumber(datum, 'tokens'),
+        valueFormatter(metricValue(datum, 'tokens')),
     },
     {
       key: labels.requests,
@@ -1144,7 +1127,6 @@ export function buildFlowSankeySpec(
               kind: node.kind,
               value: node.value,
               requests: node.requests,
-              quota: node.quota,
               tokens: node.tokens,
               color: node.color,
               colorKey: node.colorKey,
@@ -1170,7 +1152,6 @@ export function buildFlowSankeySpec(
                   targetLabel: link.targetLabel,
                   value: link.value,
                   requests: link.requests,
-                  quota: link.quota,
                   tokens: link.tokens,
                   color: link.color,
                   linkColor: link.linkColor,

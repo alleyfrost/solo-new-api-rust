@@ -64,7 +64,6 @@ const row: FlowQuotaDataItem = {
   channel_id: 101,
   channel_name: 'east',
   model_name: 'gpt-4.1',
-  quota: 100,
   token_used: 40,
   count: 2,
 }
@@ -75,7 +74,7 @@ afterEach(() => {
 
 describe('flow sankey tooltip', () => {
   test('renders an HTML token name in the node tooltip title as text', () => {
-    const result = buildDashboardFlowData([row], 'quota', { role: 'root' })
+    const result = buildDashboardFlowData([row], 'tokens', { role: 'root' })
     const spec = buildFlowSankeySpec(result.flow, 'Flow')
     const tokenNode = spec.data[0].values[0].nodes.find(
       (node: Record<string, unknown>) => node.key === 'token:11'

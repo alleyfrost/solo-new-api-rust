@@ -44,8 +44,6 @@ beforeEach(() => {
     id: 1,
     username: 'dashboard-user',
     role: 1,
-    quota: 1000000,
-    used_quota: 1000,
     request_count: 1,
   })
   client = new QueryClient({
@@ -187,7 +185,7 @@ describe('overview setup guide', () => {
     await user.click(
       await screen.findByRole('button', { name: 'Hide setup guide' })
     )
-    expect(screen.getByText('Setup progress: 1/3')).toBeVisible()
+    expect(screen.getByText('Setup progress: 1/2')).toBeVisible()
     expect(
       screen.getByText('Setup guide is collapsed. Expand it anytime.')
     ).toBeVisible()
@@ -206,18 +204,16 @@ describe('overview setup guide', () => {
       id: 1,
       username: 'dashboard-user',
       role: 1,
-      quota: 1000000,
     })
     window.localStorage.setItem(storageKey, 'collapsed')
     await renderOverview()
-    expect(await screen.findByText('Setup progress: 2/3')).toBeVisible()
+    expect(await screen.findByText('Setup progress: 1/2')).toBeVisible()
 
     act(() => {
       useAuthStore.getState().auth.setUser({
         id: 1,
         username: 'dashboard-user',
         role: 1,
-        quota: 1000000,
         request_count: 1,
       })
     })

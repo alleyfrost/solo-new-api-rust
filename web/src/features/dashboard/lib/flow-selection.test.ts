@@ -111,9 +111,9 @@ describe('dashboard flow selection helpers', () => {
     ).toThrow(/database unavailable/)
     expect(
       requireSuccessfulFlowRows(
-        { success: true, data: [{ user_id: 1, quota: 10 }] },
+        { success: true, data: [{ user_id: 1, token_used: 10 }] },
         'Failed to load'
       )
-    ).toEqual([{ user_id: 1, quota: 10 }])
+    ).toEqual([{ user_id: 1, token_used: 10 }])
   })
 })

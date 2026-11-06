@@ -531,7 +531,7 @@ export function OverviewDashboard() {
       },
       {
         title: t('Usage Logs'),
-        description: t('Inspect requests, errors, and billing details'),
+        description: t('Detailed request logs for investigations.'),
         to: '/usage-logs',
         icon: FileText,
       },
@@ -646,9 +646,7 @@ export function OverviewDashboard() {
                               {t('Build on your API gateway in minutes')}
                             </h3>
                             <p className='text-muted-foreground max-w-xl text-sm leading-relaxed'>
-                              {t(
-                                'A focused home for keys, balance, routing, and service health.'
-                              )}
+                              {t('Dashboards, tokens, and usage analytics.')}
                             </p>
                           </div>
                           <div className='flex flex-wrap items-center gap-2'>
