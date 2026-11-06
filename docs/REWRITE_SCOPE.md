@@ -64,13 +64,13 @@
 
 | 功能 | 决策 | 状态 | 备注 |
 | --- | --- | --- | --- |
-| SQLite 同库同 schema | 复刻 | 待实现 | `/data/one-api.db`，WAL |
-| `users` / `tokens` / `channels` / `abilities` / `options` 读取 | 复刻 | 待实现 | 未知列/JSON 原样保留 |
+| SQLite 同库同 schema | 复刻 | 已实现 | M1：WAL 连接 + 必需表/列校验 |
+| `users` / `tokens` / `channels` / `abilities` / `options` 读取 | 复刻 | 已实现 | M1：内存缓存加载，未知列不解析 |
 | `logs` 消费日志写入 | 复刻 | 待实现 | `type=2`，`quota=0`，记录 token/耗时/渠道/Key 索引 |
 | `quota_data` 统计 | 待评估 | 待评估 | 看板可直接从 `logs` 聚合，避免双写 |
-| `user_sessions` 会话持久化 | 复刻 | 待实现 | 管理员登录会话 |
-| 多 Token 管理 | 复刻 | 待实现 | 状态/过期/分组/模型限制/IP 白名单 |
-| 单用户密码登录（argon2id） | 复刻 | 待实现 | 复用现有 hash |
+| `user_sessions` 会话持久化 | 复刻 | 已实现 | M1：JWT + refresh cookie |
+| 多 Token 管理 | 复刻 | 待实现 | 状态/过期/分组/模型限制/IP 白名单（认证已实现，CRUD 待做） |
+| 单用户密码登录（argon2id） | 复刻 | 已实现 | M1：登录/刷新/登出 |
 | 多租户/用户管理/注册 | 不复刻 | 不复刻 | 个人使用 |
 | OAuth / 邮箱验证 / 2FA / Passkey | 不复刻 | 不复刻 | 按需求去掉 |
 | 额度扣减 / 充值 / 订阅 / 兑换码 / 邀请 / 签到 | 不复刻 | 不复刻 | 不做额度拦截与支付 |
@@ -85,7 +85,7 @@
 | `POST /v1/messages`（含 `?beta=true`） | 复刻 | 待实现 | Anthropic↔OpenAI Chat 转换 |
 | `POST /v1/responses` | 复刻 | 待实现 | Responses↔Chat 转换（现网无真实流量） |
 | `POST /v1/messages/count_tokens` | 不复刻 | 不复刻 | 现网一直 404，保持 404 |
-| `GET /v1/models`、`GET /v1/models/:model` | 复刻 | 待实现 | 按分组/Token 限制聚合 |
+| `GET /v1/models`、`GET /v1/models/:model` | 复刻 | 已实现 | M1：按分组/Token 限制聚合 |
 | `POST /v1/embeddings` | 复刻 | 待实现 | 透传 |
 | `POST /v1/images/generations`、`/v1/images/edits` | 复刻 | 待实现 | 透传 |
 | `POST /v1/audio/transcriptions`、`translations`、`speech` | 复刻 | 待实现 | multipart/二进制透传 |
@@ -133,8 +133,8 @@
 
 | 功能 | 决策 | 状态 | 备注 |
 | --- | --- | --- | --- |
-| `/api/status` 健康检查 | 复刻 | 待实现 | 兼容现有 Docker healthcheck |
-| 优雅停机 | 复刻 | 待实现 | SSE 最长等待，可配置 |
+| `/api/status` 健康检查 | 复刻 | 已实现 | M1：兼容现有 Docker healthcheck |
+| 优雅停机 | 复刻 | 已实现 | M1：SIGINT/SIGTERM |
 | 本地交叉编译 + 上传 | 复刻 | 待实现 | linux/amd64，参考现有 rust:bookworm 配方 |
 | Docker 服务替换 | 复刻 | 待实现 | 保留 `./data:/data`、端口 20128→3000 |
 | 回滚到 Go 版本 | 复刻 | 待实现 | 数据只增量写，保留旧镜像 |
@@ -143,7 +143,9 @@
 
 ## 5. 线上现状（用于验收）
 
-- 数据库：`one-api.db`（231 MB，WAL），已拷贝到本地 `data/`（不入 Git）。
+- 数据库：`one-api.db`（约 231 MB，WAL），本地验收使用 SQLite 在线备份 API 生成的一致快照 `data/one-api-consistent.db`（不入 Git）。
+  - 直接热拷贝主库 + WAL/SHM 会得到不一致副本（`PRAGMA integrity_check` 失败），不能用于兼容性验收。
+  - 线上 `quick_check` 为 ok；本地热拷贝的损坏是拷贝方式造成的，不是源库问题。
 - 用户：1 个 root（`alleyfrost`），角色 100。
 - Token：11 个（10 启用、1 禁用），全部 `unlimited_quota=1`；分组 `default`/`vip`。
 - 渠道：3 个

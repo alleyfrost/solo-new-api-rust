@@ -328,7 +328,7 @@ Token（与前端 `features/keys` 契约）：
   - Rust：本机 `docker run --platform linux/amd64 -v $PWD:/src -v cargo-cache:/root/.cargo rust:1.96.0-bookworm` 编译 `cargo build --release --target x86_64-unknown-linux-gnu`。
   - 镜像：`debian:bookworm-slim` + `ca-certificates` + `tzdata` + 二进制 + `web/dist`；`EXPOSE 3000`；`HEALTHCHECK` 调 `/api/status`。
 - 上传：`docker save solo-new-api-rust:<tag> | ssh aliyun docker load`；旧镜像打 `rollback` tag。
-- 切换：备份 `data/one-api.db*`（停旧容器后拷贝三文件或 `sqlite3 checkpoint`）；更新 compose `image`；`docker compose up -d`；健康检查；冒烟；观察日志。
+- 切换：用 SQLite 在线备份 API（`python3 -c 'sqlite3.connect(src).backup(dst)'` 或 `sqlite3 src ".backup dst"`）生成一致快照；直接拷贝 db+wal+shm 会得到不一致副本。更新 compose `image`；`docker compose up -d`；健康检查；冒烟；观察日志。
 - 回滚：compose 改回旧镜像 tag 并 `up -d`；数据兼容（仅增量 logs）。
 - 不允许新旧进程同时打开同一 SQLite。
 

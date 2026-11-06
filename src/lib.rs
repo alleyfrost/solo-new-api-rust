@@ -7,4 +7,4 @@ pub mod routes;
 pub mod state;
 pub mod web;
 
-pub const START_TIME: i64 = 0; // Task 8 替换为 OnceLock
+pub static START_TIME: std::sync::OnceLock<i64> = std::sync::OnceLock::new();

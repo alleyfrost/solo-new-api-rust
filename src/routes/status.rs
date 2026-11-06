@@ -5,7 +5,7 @@ use crate::error::json_ok;
 pub async fn get_status() -> Response {
     let data = json!({
         "version": env!("CARGO_PKG_VERSION"),
-        "start_time": crate::START_TIME,
+        "start_time": crate::START_TIME.get().copied().unwrap_or(0),
         "system_name": "solo-new-api",
         "self_use_mode_enabled": true,
         "password_login_enabled": true,
