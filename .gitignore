@@ -1,0 +1,19 @@
+# local data & secrets
+/data/
+.env
+*.log
+*.db
+*.db-wal
+*.db-shm
+
+# rust
+/target/
+**/target/
+
+# frontend
+/web/node_modules/
+/web/dist/
+node_modules/
+
+# misc
+.DS_Store
