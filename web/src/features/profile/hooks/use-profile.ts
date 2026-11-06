@@ -22,12 +22,8 @@ import { toast } from 'sonner'
 
 import { handleServerError } from '@/lib/handle-server-error'
 
-import { getUserProfile, updateUserProfile, updateUserSettings } from '../api'
-import type {
-  UserProfile,
-  UpdateUserRequest,
-  UpdateUserSettingsRequest,
-} from '../types'
+import { getUserProfile, updateUserProfile } from '../api'
+import type { UserProfile, UpdateProfileRequest } from '../types'
 
 // ============================================================================
 // Profile Hook
@@ -69,7 +65,7 @@ export function useProfile() {
 
   // Update user profile
   const updateProfile = useCallback(
-    async (data: UpdateUserRequest): Promise<boolean> => {
+    async (data: UpdateProfileRequest): Promise<boolean> => {
       try {
         setUpdating(true)
         const response = await updateUserProfile(data)
@@ -92,31 +88,6 @@ export function useProfile() {
     [refreshProfile]
   )
 
-  // Update user settings
-  const updateSettings = useCallback(
-    async (data: UpdateUserSettingsRequest): Promise<boolean> => {
-      try {
-        setUpdating(true)
-        const response = await updateUserSettings(data)
-
-        if (response.success) {
-          toast.success(i18next.t('Settings updated successfully'))
-          await refreshProfile() // Refresh profile silently
-          return true
-        }
-
-        handleServerError(response, i18next.t('Failed to update settings'))
-        return false
-      } catch (error) {
-        handleServerError(error, i18next.t('Failed to update settings'))
-        return false
-      } finally {
-        setUpdating(false)
-      }
-    },
-    [refreshProfile]
-  )
-
   // Initial fetch
   useEffect(() => {
     fetchProfile()
@@ -129,6 +100,5 @@ export function useProfile() {
     fetchProfile,
     refreshProfile,
     updateProfile,
-    updateSettings,
   }
 }

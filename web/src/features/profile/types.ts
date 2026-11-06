@@ -16,15 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type { UserPermissions } from '@/stores/auth-store'
+import type { LoginSession } from '@/stores/auth-store'
 
 // ============================================================================
 // Profile Type Definitions
 // ============================================================================
 
-/**
- * Generic API response
- */
 export interface ApiResponse<T = unknown> {
   success: boolean
   message?: string
@@ -32,210 +29,41 @@ export interface ApiResponse<T = unknown> {
 }
 
 /**
- * User profile data
+ * What `GET /api/user/self` returns. Usage figures come from the log table:
+ * this deployment records usage only, never money, so there is no balance.
  */
 export interface UserProfile {
-  has_password?: boolean
-  permissions?: UserPermissions
-  /** User ID */
   id: number
-  /** Username */
   username: string
-  /** Display name */
   display_name: string
-  /** User role (1=普通用户, 10=管理员, 100=超级管理员) */
   role: number
-  /** Email address */
-  email?: string
-  /** User group */
-  group: string
-  /** Current quota balance */
-  quota: number
-  /** Total used quota */
-  used_quota: number
-  /** Total request count */
-  request_count: number
-  /** Account status (1=启用, 2=禁用, 3=待审核, 4=已删除) */
   status: number
-  /** Access token (system token) */
-  access_token?: string
-  /** Affiliate code */
-  aff_code?: string
-  /** Number of successful affiliate invites */
-  aff_count: number
-  /** Affiliate quota (pending rewards) */
-  aff_quota: number
-  /** Total affiliate quota earned (historical) */
-  aff_history_quota: number
-  /** Invite user ID */
-  invite_user_id?: number
-  /** Account creation timestamp */
-  created_time: number
-  /** User settings (JSON string) */
+  group: string
+  email?: string
+  has_password?: boolean
   setting?: string
-  /** WeChat ID (OAuth) */
-  wechat_id?: string
-  /** GitHub ID (OAuth) */
-  github_id?: string
-  /** Discord ID (OAuth) */
-  discord_id?: string
-  /** OIDC ID (OAuth) */
-  oidc_id?: string
-  /** Telegram ID (OAuth) */
-  telegram_id?: string
-  /** LinuxDO ID (OAuth) */
-  linux_do_id?: string
+  created_time: number
+  request_count: number
+  prompt_tokens: number
+  completion_tokens: number
 }
 
-/**
- * Notification type
- */
-export type NotifyType = 'email' | 'webhook' | 'bark' | 'gotify'
-
-/**
- * Parsed user settings
- */
-export interface UserSettings {
-  /** Notification type */
-  notify_type?: NotifyType
-  /** Quota warning threshold in quota units; 0 or absent uses the site default */
-  quota_warning_threshold?: number
-  /** Receive low balance reminders; absent means on */
-  quota_warning_enabled?: boolean
-  /** Webhook URL */
-  webhook_url?: string
-  /** Webhook secret */
-  webhook_secret?: string
-  /** Notification email */
-  notification_email?: string
-  /** Bark URL */
-  bark_url?: string
-  /** Gotify server URL */
-  gotify_url?: string
-  /** Gotify application token */
-  gotify_token?: string
-  /** Gotify message priority (0-10) */
-  gotify_priority?: number
-  /** Accept unset model ratio model */
-  accept_unset_model_ratio_model?: boolean
-  /** Record IP log */
-  record_ip_log?: boolean
-  /** Receive upstream model update notifications (admin only) */
-  upstream_model_update_notify_enabled?: boolean
-  /** Receive channel notifications (admin only); absent means on for root only */
-  channel_notify_enabled?: boolean
-  /** Preferred interface/API response language */
-  language?: string
-}
-
-/**
- * User update request
- */
-export interface UpdateUserRequest {
+export interface UpdateProfileRequest {
   display_name?: string
+  language?: string
   password?: string
   original_password?: string
 }
 
-export interface AccountSecurityResult {
-  notification_warning?: boolean
+/** Keys of the `users.setting` JSON blob that this UI owns. */
+export interface UserSettings {
+  language?: string
 }
 
-export interface EmailBindingFlow extends AccountSecurityResult {
-  flow_token: string
-  email: string
-  current_email?: string
-  old_email_required: boolean
-  expires_at: number
-  resend_at: number
-}
-
-/**
- * User settings update request
- */
-export interface UpdateUserSettingsRequest {
-  notify_type?: string
-  quota_warning_threshold?: number
-  quota_warning_enabled?: boolean
-  webhook_url?: string
-  webhook_secret?: string
-  notification_email?: string
-  bark_url?: string
-  gotify_url?: string
-  gotify_token?: string
-  gotify_priority?: number
-  accept_unset_model_ratio_model?: boolean
-  record_ip_log?: boolean
-  upstream_model_update_notify_enabled?: boolean
-  channel_notify_enabled?: boolean
-}
-
-/**
- * Account binding item
- */
-export interface BindingItem {
-  id: string
-  label: string
-  icon: React.ElementType
-  value?: string
-  isBound: boolean
-  isEnabled: boolean
-  onBind: () => void
-}
-
-/**
- * Two-Factor Authentication Status
- */
-export interface TwoFAStatus {
-  enabled: boolean
-  locked: boolean
-  backup_codes_remaining: number
-}
-
-// ============================================================================
-// Checkin Type Definitions
-// ============================================================================
-
-/**
- * Checkin record for a specific date
- */
-export interface CheckinRecord {
-  /** Check-in date (YYYY-MM-DD) */
-  checkin_date: string
-  /** Quota awarded for this check-in */
-  quota_awarded: number
-}
-
-/**
- * Checkin statistics
- */
-export interface CheckinStats {
-  /** Whether user has checked in today */
-  checked_in_today: boolean
-  /** Total number of check-ins */
-  total_checkins: number
-  /** Total quota earned from check-ins */
-  total_quota: number
-  /** Current month check-in count */
-  checkin_count: number
-  /** Check-in records for the queried month */
-  records: CheckinRecord[]
-}
-
-/**
- * Check-in status response
- */
-export interface CheckinStatusResponse {
-  /** Whether check-in feature is enabled */
-  enabled: boolean
-  /** Check-in statistics */
-  stats: CheckinStats
-}
-
-/**
- * Check-in action response
- */
-export interface CheckinResponse {
-  /** Quota awarded for this check-in */
-  quota_awarded: number
+export interface PasswordChangeResult {
+  access_token: string
+  token_type: string
+  access_expires_at: number
+  has_password: boolean
+  session: LoginSession
 }

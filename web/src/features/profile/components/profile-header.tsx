@@ -25,7 +25,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { IconBadge, type IconBadgeTone } from '@/components/ui/icon-badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { getUserAvatarFallback, getUserAvatarStyle } from '@/lib/avatar'
-import { formatCompactNumber, formatQuota } from '@/lib/format'
+import { formatCompactNumber } from '@/lib/format'
 import { getRoleLabel } from '@/lib/roles'
 
 import { getDisplayName } from '../lib'
@@ -92,25 +92,25 @@ export function ProfileHeader({ profile, loading }: ProfileHeaderProps) {
     tone: IconBadgeTone
   }[] = [
     {
-      label: t('Current Balance'),
-      value: formatQuota(profile.quota),
-      description: t('Remaining quota'),
-      icon: WalletCards,
-      tone: 'success',
-    },
-    {
-      label: t('Total Usage'),
-      value: formatQuota(profile.used_quota),
-      description: t('Total consumed quota'),
-      icon: BarChart3,
-      tone: 'info',
-    },
-    {
       label: t('API Requests'),
       value: formatCompactNumber(profile.request_count),
       description: t('Total requests made'),
       icon: Activity,
       tone: 'chart-4',
+    },
+    {
+      label: t('Input Tokens'),
+      value: formatCompactNumber(profile.prompt_tokens),
+      description: t('Prompt tokens consumed'),
+      icon: WalletCards,
+      tone: 'success',
+    },
+    {
+      label: t('Output Tokens'),
+      value: formatCompactNumber(profile.completion_tokens),
+      description: t('Completion tokens generated'),
+      icon: BarChart3,
+      tone: 'info',
     },
   ]
 
