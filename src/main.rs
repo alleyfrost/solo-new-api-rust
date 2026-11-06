@@ -21,7 +21,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let login_route = axum::Router::new()
-        .route("/api/user/login", axum::routing::post(routes::user::login));
+        .route("/api/user/login", axum::routing::post(routes::user::login))
+        .route("/api/user/auth/refresh", axum::routing::post(routes::user::refresh))
+        .route("/api/user/auth/logout", axum::routing::post(routes::user::logout));
     let self_route = axum::Router::new()
         .route("/api/user/self", axum::routing::get(routes::user::self_info))
         .route_layer(axum::middleware::from_fn_with_state(

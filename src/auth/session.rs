@@ -1,6 +1,8 @@
+use std::collections::HashMap;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
+use axum::http::HeaderMap;
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -136,4 +138,70 @@ pub async fn create_session(
             created_at: created, last_active_at: created, expires_at: expires,
         },
     }, refresh_plain))
+}
+
+pub fn parse_refresh_cookie(headers: &HeaderMap) -> Option<(String, String)> {
+    let cookie = headers.get("cookie")?.to_str().ok()?;
+    let value = cookie
+        .split(';')
+        .find_map(|part| part.trim().strip_prefix("new_api_refresh="))?;
+    let (sid, secret) = value.split_once('.')?;
+    Some((sid.to_string(), secret.to_string()))
+}
+
+pub async fn refresh_session(
+    pool: &sqlx::SqlitePool,
+    users: &HashMap<i64, UserRow>,
+    sid: &str,
+    secret: &str,
+    jwt_secret: &[u8],
+) -> Result<(AuthBundle, String), ApiError> {
+    let row: Option<(i64, i64, i64, String, String, Option<String>, i64, String, String, String, i64, i64, i64)> =
+        sqlx::query_as(
+            "SELECT user_id, version, user_auth_version, status, refresh_hash, previous_refresh_hash, \
+             previous_valid_until, login_method, ip, user_agent, created_at, last_active_at, expires_at \
+             FROM user_sessions WHERE sid=?"
+        ).bind(sid).fetch_optional(pool).await
+        .map_err(|e| ApiError::new(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let Some((user_id, version, uver, status, refresh_hash, prev_hash, prev_until, method, ip, ua, created, _last, expires)) = row else {
+        return Err(ApiError::new(axum::http::StatusCode::UNAUTHORIZED, "Session expired!"));
+    };
+    if status != "active" || expires <= now() {
+        return Err(ApiError::new(axum::http::StatusCode::UNAUTHORIZED, "Session expired!"));
+    }
+    let presented = sha256_hex(secret.as_bytes());
+    let valid = presented == refresh_hash
+        || (prev_until > now() && prev_hash.as_deref() == Some(presented.as_str()));
+    if !valid {
+        return Err(ApiError::new(axum::http::StatusCode::UNAUTHORIZED, "Session expired!"));
+    }
+    use rand::RngCore;
+    let mut next = vec![0u8; 32];
+    rand::thread_rng().fill_bytes(&mut next);
+    let next_plain = hex::encode(&next);
+    let active = now();
+    sqlx::query(
+        "UPDATE user_sessions SET refresh_hash=?, previous_refresh_hash=?, previous_valid_until=?, last_active_at=? WHERE sid=?"
+    )
+    .bind(sha256_hex(next_plain.as_bytes())).bind(&refresh_hash)
+    .bind(active + 60).bind(active).bind(sid)
+    .execute(pool).await
+    .map_err(|e| ApiError::new(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let user = users.get(&user_id)
+        .ok_or_else(|| ApiError::new(axum::http::StatusCode::UNAUTHORIZED, "Session expired!"))?;
+    let access_exp = active + 15 * 60;
+    let claims = Claims { sub: user_id, sid: sid.to_string(), ver: version, uver, iat: active, exp: access_exp };
+    let access_token = issue_access(&claims, jwt_secret)?;
+    let bundle = AuthBundle {
+        access_token,
+        token_type: "Bearer",
+        access_expires_at: access_exp,
+        user: user_json(user),
+        session: SessionView {
+            sid: sid.to_string(), current: true, login_method: method,
+            ip, user_agent: ua, created_at: created, last_active_at: active, expires_at: expires,
+        },
+    };
+    Ok((bundle, next_plain))
 }

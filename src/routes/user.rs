@@ -44,6 +44,31 @@ pub async fn login(State(state): State<AppState>, headers: HeaderMap, axum::Json
     Ok(response)
 }
 
+pub async fn refresh(State(state): State<AppState>, headers: HeaderMap) -> Result<Response, ApiError> {
+    let (sid, secret) = session::parse_refresh_cookie(&headers)
+        .ok_or_else(|| ApiError::new(StatusCode::UNAUTHORIZED, "Session expired!"))?;
+    let (bundle, next_plain) = {
+        let users = state.caches.read().expect("cache lock").users.clone();
+        session::refresh_session(&state.pool, &users, &sid, &secret, &state.jwt_secret).await?
+    };
+    let mut response = json_ok(&bundle);
+    response.headers_mut().insert("set-cookie", set_cookie(&sid, &next_plain).parse().unwrap());
+    Ok(response)
+}
+
+pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let sid = session::parse_refresh_cookie(&headers).map(|(sid, _)| sid)
+        .or_else(|| headers.get("x-auth-session").and_then(|v| v.to_str().ok()).map(|v| v.to_string()));
+    if let Some(sid) = sid {
+        let _ = sqlx::query("UPDATE user_sessions SET status='revoked', revoked_at=?, revoked_reason='logout' WHERE sid=?")
+            .bind(session::now()).bind(&sid).execute(&state.pool).await;
+    }
+    let mut response = json_ok(&serde_json::json!({}));
+    response.headers_mut().insert("set-cookie",
+        "new_api_refresh=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0".parse().unwrap());
+    response
+}
+
 pub async fn self_info(State(state): State<AppState>, Extension(ctx): Extension<AdminContext>) -> Response {
     let caches = state.caches.read().expect("cache lock");
     match caches.users.get(&ctx.user_id) {

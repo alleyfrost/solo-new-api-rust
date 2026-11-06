@@ -1183,7 +1183,7 @@ git commit -m "feat(m1): admin login with JWT and session"
 - Test: `tests/admin_refresh.rs`
 
 **Interfaces:**
-- Produces: `session::parse_refresh_cookie(&HeaderMap) -> Option<(String, String)>`（sid, secret）；`session::refresh_session(&SqlitePool, &Caches, sid, secret, jwt_secret) -> Result<(AuthBundle, String), ApiError>`；`routes::user::{refresh, logout}`。
+- Produces: `session::parse_refresh_cookie(&HeaderMap) -> Option<(String, String)>`（sid, secret）；`session::refresh_session(&SqlitePool, users: &HashMap<i64, UserRow>, sid, secret, jwt_secret) -> Result<(AuthBundle, String), ApiError>`；`routes::user::{refresh, logout}`。
 
 - [ ] **Step 1: `session.rs` 增加 cookie 解析与刷新**
 
@@ -1200,7 +1200,7 @@ pub fn parse_refresh_cookie(headers: &HeaderMap) -> Option<(String, String)> {
 
 pub async fn refresh_session(
     pool: &sqlx::SqlitePool,
-    caches: &crate::state::Caches,
+    users: &std::collections::HashMap<i64, crate::model::UserRow>,
     sid: &str,
     secret: &str,
     jwt_secret: &[u8],
@@ -1237,7 +1237,7 @@ pub async fn refresh_session(
     .execute(pool).await
     .map_err(|e| ApiError::new(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    let user = caches.users.get(&user_id)
+    let user = users.get(&user_id)
         .ok_or_else(|| ApiError::new(axum::http::StatusCode::UNAUTHORIZED, "Session expired!"))?;
     let access_exp = active + 15 * 60;
     let claims = Claims { sub: user_id, sid: sid.to_string(), ver: version, uver, iat: active, exp: access_exp };
@@ -1263,8 +1263,8 @@ pub async fn refresh(State(state): State<AppState>, headers: HeaderMap) -> Resul
     let (sid, secret) = session::parse_refresh_cookie(&headers)
         .ok_or_else(|| ApiError::new(StatusCode::UNAUTHORIZED, "Session expired!"))?;
     let (bundle, next_plain) = {
-        let caches = state.caches.read().expect("cache lock");
-        session::refresh_session(&state.pool, &caches, &sid, &secret, &state.jwt_secret).await?
+        let users = state.caches.read().expect("cache lock").users.clone();
+        session::refresh_session(&state.pool, &users, &sid, &secret, &state.jwt_secret).await?
     };
     let mut response = json_ok(&bundle);
     response.headers_mut().insert("set-cookie", set_cookie(&sid, &next_plain).parse().unwrap());
