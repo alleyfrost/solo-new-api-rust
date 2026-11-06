@@ -86,11 +86,11 @@
 | `POST /v1/responses` | 复刻 | 已实现 | M2：Responses↔Chat 转换（现网无真实流量） |
 | `POST /v1/messages/count_tokens` | 不复刻 | 不复刻 | 现网一直 404，保持 404 |
 | `GET /v1/models`、`GET /v1/models/:model` | 复刻 | 已实现 | M1：按分组/Token 限制聚合 |
-| `POST /v1/embeddings` | 复刻 | 待实现 | 透传 |
-| `POST /v1/images/generations`、`/v1/images/edits` | 复刻 | 待实现 | 透传 |
-| `POST /v1/audio/transcriptions`、`translations`、`speech` | 复刻 | 待实现 | multipart/二进制透传 |
-| `POST /v1/rerank` | 复刻 | 待实现 | 透传 |
-| `POST /v1/completions`、`/v1/moderations` | 复刻 | 待实现 | 透传 |
+| `POST /v1/embeddings` | 复刻 | 已实现 | M4：JSON 透传，记录 usage |
+| `POST /v1/images/generations`、`/v1/images/edits` | 复刻 | 已实现 | M4：JSON/multipart 透传，按 model 路由 |
+| `POST /v1/audio/transcriptions`、`translations`、`speech` | 复刻 | 已实现 | M4：multipart 提取 model 路由；speech 二进制回传 |
+| `POST /v1/rerank` | 复刻 | 已实现 | M4：JSON 透传，记录 usage |
+| `POST /v1/completions`、`/v1/moderations` | 复刻 | 已实现 | M4：JSON 透传，completions 记录 usage |
 | Gemini 原生 `/v1beta/*` | 不复刻 | 不复刻 | 现网未使用 |
 | Realtime WebSocket / Responses WebSocket | 不复刻 | 不复刻 | 现网未使用 |
 | Midjourney / Task / Video / Suno / JS 插件 | 不复刻 | 不复刻 | 现网未使用 |

@@ -55,6 +55,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/v1/responses",
             axum::routing::post(solo_new_api_rust::relay::responses::responses),
         )
+        .route(
+            "/v1/embeddings",
+            axum::routing::post(solo_new_api_rust::relay::extra::embeddings),
+        )
+        .route(
+            "/v1/images/generations",
+            axum::routing::post(solo_new_api_rust::relay::extra::image_generations),
+        )
+        .route(
+            "/v1/images/edits",
+            axum::routing::post(solo_new_api_rust::relay::extra::image_edits),
+        )
+        .route(
+            "/v1/audio/transcriptions",
+            axum::routing::post(solo_new_api_rust::relay::extra::audio_transcriptions),
+        )
+        .route(
+            "/v1/audio/translations",
+            axum::routing::post(solo_new_api_rust::relay::extra::audio_translations),
+        )
+        .route(
+            "/v1/audio/speech",
+            axum::routing::post(solo_new_api_rust::relay::extra::audio_speech),
+        )
+        .route(
+            "/v1/rerank",
+            axum::routing::post(solo_new_api_rust::relay::extra::rerank),
+        )
+        .route(
+            "/v1/completions",
+            axum::routing::post(solo_new_api_rust::relay::extra::completions),
+        )
+        .route(
+            "/v1/moderations",
+            axum::routing::post(solo_new_api_rust::relay::extra::moderations),
+        )
         .layer(axum::extract::DefaultBodyLimit::max(
             config.max_request_bytes,
         ))

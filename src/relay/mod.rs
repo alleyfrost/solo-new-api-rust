@@ -272,6 +272,8 @@ fn find_boundary(buf: &[u8]) -> Option<(usize, usize)> {
 }
 
 pub mod chat;
+pub mod extra;
 pub mod forward;
 pub mod messages;
+pub mod passthrough;
 pub mod responses;

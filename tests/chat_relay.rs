@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use axum::Router;
 use axum::body::{Body, Bytes};
 use axum::http::Request;
-use axum::Router;
 use http_body_util::BodyExt;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
@@ -116,19 +116,18 @@ async fn setup(
             settings: None,
         },
     );
-    caches
-        .abilities
-        .insert(("default".into(), "m1".into()), vec![AbilityRow {
+    caches.abilities.insert(
+        ("default".into(), "m1".into()),
+        vec![AbilityRow {
             group: "default".into(),
             model: "m1".into(),
             channel_id: 3,
             enabled: true,
             priority: Some(0),
             weight: Some(0),
-        }]);
-    caches
-        .options
-        .insert("RetryTimes".into(), "3".into());
+        }],
+    );
+    caches.options.insert("RetryTimes".into(), "3".into());
 
     let (tx, rx) = solo_new_api_rust::logging::channel(64);
     let writer = solo_new_api_rust::logging::spawn_writer(pool.clone(), rx);
@@ -153,6 +152,30 @@ async fn setup(
         .route(
             "/v1/responses",
             axum::routing::post(solo_new_api_rust::relay::responses::responses),
+        )
+        .route(
+            "/v1/embeddings",
+            axum::routing::post(solo_new_api_rust::relay::extra::embeddings),
+        )
+        .route(
+            "/v1/audio/transcriptions",
+            axum::routing::post(solo_new_api_rust::relay::extra::audio_transcriptions),
+        )
+        .route(
+            "/v1/audio/speech",
+            axum::routing::post(solo_new_api_rust::relay::extra::audio_speech),
+        )
+        .route(
+            "/v1/rerank",
+            axum::routing::post(solo_new_api_rust::relay::extra::rerank),
+        )
+        .route(
+            "/v1/completions",
+            axum::routing::post(solo_new_api_rust::relay::extra::completions),
+        )
+        .route(
+            "/v1/moderations",
+            axum::routing::post(solo_new_api_rust::relay::extra::moderations),
         )
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
@@ -314,15 +337,14 @@ async fn stream_tap_hides_usage_and_logs_tokens() {
         .await;
 
     let fixture = setup(&server.uri(), "sk-up", 1, None, None).await;
-    let (status, body, pool) = send(
-        fixture,
-        r#"{"model":"m1","messages":[],"stream":true}"#,
-    )
-    .await;
+    let (status, body, pool) = send(fixture, r#"{"model":"m1","messages":[],"stream":true}"#).await;
     assert_eq!(status, 200);
     let text = String::from_utf8_lossy(&body).to_string();
     assert!(text.contains("\"content\":\"hi\""));
-    assert!(!text.contains("prompt_tokens"), "未要求 usage 时必须隐藏 usage-only 事件");
+    assert!(
+        !text.contains("prompt_tokens"),
+        "未要求 usage 时必须隐藏 usage-only 事件"
+    );
     assert!(text.contains("[DONE]"));
 
     let reqs = server.received_requests().await.unwrap();
@@ -448,12 +470,8 @@ async fn responses_client_translates_to_chat_upstream() {
         .await;
 
     let fixture = setup(&server.uri(), "sk-up", 1, None, None).await;
-    let (status, body, _) = send_to(
-        fixture,
-        "/v1/responses",
-        r#"{"model":"m1","input":"hi"}"#,
-    )
-    .await;
+    let (status, body, _) =
+        send_to(fixture, "/v1/responses", r#"{"model":"m1","input":"hi"}"#).await;
     assert_eq!(status, 200);
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     let text: String = v["output"]
@@ -514,7 +532,11 @@ async fn chat_client_translates_to_anthropic_upstream() {
         .await;
 
     let fixture = setup(&server.uri(), "sk-up", 14, None, None).await;
-    let (status, body, _) = send(fixture, r#"{"model":"m1","messages":[{"role":"user","content":"hi"}]}"#).await;
+    let (status, body, _) = send(
+        fixture,
+        r#"{"model":"m1","messages":[{"role":"user","content":"hi"}]}"#,
+    )
+    .await;
     assert_eq!(status, 200);
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(v["choices"][0]["message"]["content"], "hi");
@@ -525,4 +547,186 @@ async fn chat_client_translates_to_anthropic_upstream() {
     assert_eq!(reqs[0].headers["x-api-key"], "sk-up");
     let sent: serde_json::Value = serde_json::from_slice(&reqs[0].body).unwrap();
     assert_eq!(sent["model"], "m1");
+}
+
+async fn send_raw(
+    fixture: Fixture,
+    path: &str,
+    content_type: &str,
+    body: Vec<u8>,
+) -> (u16, Bytes, String, SqlitePool) {
+    let Fixture { app, pool, writer } = fixture;
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(path)
+                .header("authorization", "Bearer sk-abc123")
+                .header("content-type", content_type)
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = res.status().as_u16();
+    let ct = res
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string()
+        .into_bytes();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let _ = tokio::time::timeout(Duration::from_secs(3), writer)
+        .await
+        .expect("log writer should stop after router drop");
+    (
+        status,
+        bytes,
+        String::from_utf8(ct).unwrap_or_default(),
+        pool,
+    )
+}
+
+#[tokio::test]
+async fn embeddings_passthrough_preserves_body_and_logs_usage() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/embeddings"))
+        .and(header("authorization", "Bearer sk-up"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_raw(
+                r#"{"object":"list","data":[{"object":"embedding","index":0,"embedding":[0.1]}],"model":"m1","usage":{"prompt_tokens":7,"total_tokens":7}}"#,
+                "application/json",
+            ),
+        )
+        .mount(&server)
+        .await;
+
+    let fixture = setup(&server.uri(), "sk-up", 1, None, None).await;
+    let (status, body, ct, pool) = send_raw(
+        fixture,
+        "/v1/embeddings",
+        "application/json",
+        br#"{"model":"m1","input":"hello"}"#.to_vec(),
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(ct, "application/json");
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["data"][0]["embedding"][0], 0.1);
+
+    let sent = server.received_requests().await.unwrap();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(
+        sent[0].headers["content-type"].to_str().unwrap(),
+        "application/json"
+    );
+    let req: serde_json::Value = serde_json::from_slice(&sent[0].body).unwrap();
+    assert_eq!(req["input"], "hello");
+    assert_eq!(req["model"], "m1");
+
+    let row: (i64, i64, i64, String) = sqlx::query_as(
+        "SELECT prompt_tokens, completion_tokens, quota, model_name FROM logs ORDER BY id DESC LIMIT 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(row, (7, 0, 0, "m1".to_string()));
+}
+
+#[tokio::test]
+async fn audio_transcription_uses_multipart_model_for_routing() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/audio/transcriptions"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            r#"{"text":"hello world","usage":{"prompt_tokens":5,"completion_tokens":2}}"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+
+    let boundary = "----probe";
+    let multipart = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nm1\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.wav\"\r\nContent-Type: audio/wav\r\n\r\nRIFFDATA\r\n--{boundary}--\r\n"
+    )
+    .into_bytes();
+    let fixture = setup(&server.uri(), "sk-up", 1, None, None).await;
+    let (status, body, _ct, _pool) = send_raw(
+        fixture,
+        "/v1/audio/transcriptions",
+        &format!("multipart/form-data; boundary={boundary}"),
+        multipart,
+    )
+    .await;
+    assert_eq!(status, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["text"], "hello world");
+
+    let sent = server.received_requests().await.unwrap();
+    assert_eq!(sent.len(), 1);
+    assert!(
+        sent[0].headers["content-type"]
+            .to_str()
+            .unwrap()
+            .contains(&boundary)
+    );
+    let upstream_body = String::from_utf8_lossy(&sent[0].body);
+    assert!(upstream_body.contains("name=\"model\""));
+    assert!(upstream_body.contains("\r\n\r\nm1\r\n"));
+    assert!(upstream_body.contains("RIFFDATA"));
+}
+
+#[tokio::test]
+async fn audio_speech_streams_binary_response() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/audio/speech"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(b"MP3DATA".to_vec(), "audio/mpeg"))
+        .mount(&server)
+        .await;
+
+    let fixture = setup(&server.uri(), "sk-up", 1, None, None).await;
+    let (status, body, ct, _pool) = send_raw(
+        fixture,
+        "/v1/audio/speech",
+        "application/json",
+        br#"{"model":"m1","input":"hi","voice":"alloy"}"#.to_vec(),
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(ct, "audio/mpeg");
+    assert_eq!(&body[..], b"MP3DATA");
+}
+
+#[tokio::test]
+async fn completions_rerank_moderations_share_passthrough() {
+    for endpoint in ["/v1/completions", "/v1/rerank", "/v1/moderations"] {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path(endpoint))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(
+                r#"{"id":"x","usage":{"prompt_tokens":1,"completion_tokens":2}}"#,
+                "application/json",
+            ))
+            .mount(&server)
+            .await;
+
+        let fixture = setup(&server.uri(), "sk-up", 1, None, None).await;
+        let (status, body, _ct, _pool) = send_raw(
+            fixture,
+            endpoint,
+            "application/json",
+            br#"{"model":"m1","prompt":"hi"}"#.to_vec(),
+        )
+        .await;
+        assert_eq!(status, 200, "{endpoint}");
+        assert!(String::from_utf8_lossy(&body).contains("\"id\":\"x\""));
+        assert_eq!(
+            server.received_requests().await.unwrap().len(),
+            1,
+            "{endpoint}"
+        );
+    }
 }
