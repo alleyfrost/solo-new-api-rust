@@ -411,3 +411,121 @@ Expected: 全绿。
 git add Cargo.toml Cargo.lock src/upstream.rs src/lib.rs tests/upstream.rs
 git commit -m "feat(m2): upstream url and header rewriting"
 ```
+
+---
+
+## Task 3: 重试决策与退避
+
+**Files:**
+- Create: `src/retry.rs`
+- Modify: `src/lib.rs`
+- Test: `tests/retry.rs`
+
+**Interfaces:**
+- Produces:
+  - `retry::RetryDecision { Retry, Stop }`
+  - `retry::decide(status: Option<u16>, attempt: usize, max_retry: usize) -> RetryDecision`
+  - `retry::backoff(status: Option<u16>, attempt: usize) -> std::time::Duration`
+  - `retry::max_retry_from_options(options: &std::collections::HashMap<String, String>) -> usize`
+
+- [ ] **Step 1: 写失败测试 `tests/retry.rs`**
+
+```rust
+use std::collections::HashMap;
+use std::time::Duration;
+use solo_new_api_rust::retry::{backoff, decide, max_retry_from_options, RetryDecision};
+
+#[test]
+fn retries_rate_limits_server_errors_auth_and_network() {
+    for status in [Some(408), Some(429), Some(401), Some(403), Some(500), Some(503), None] {
+        assert_eq!(decide(status, 0, 10), RetryDecision::Retry, "status {status:?}");
+    }
+}
+
+#[test]
+fn stops_on_client_errors_and_budget_exhaustion() {
+    for status in [Some(400), Some(404), Some(413), Some(422)] {
+        assert_eq!(decide(status, 0, 10), RetryDecision::Stop, "status {status:?}");
+    }
+    assert_eq!(decide(Some(503), 10, 10), RetryDecision::Stop);
+}
+
+#[test]
+fn rate_limit_rotates_immediately_and_server_errors_back_off() {
+    assert_eq!(backoff(Some(429), 3), Duration::ZERO);
+    assert_eq!(backoff(Some(401), 3), Duration::ZERO);
+    assert_eq!(backoff(Some(500), 0), Duration::from_millis(100));
+    assert_eq!(backoff(Some(500), 1), Duration::from_millis(200));
+    assert_eq!(backoff(Some(500), 9), Duration::from_millis(1000));
+}
+
+#[test]
+fn retry_budget_reads_option_and_clamps() {
+    let mut options = HashMap::new();
+    assert_eq!(max_retry_from_options(&options), 3);
+    options.insert("RetryTimes".into(), "10".into());
+    assert_eq!(max_retry_from_options(&options), 10);
+    options.insert("RetryTimes".into(), "99".into());
+    assert_eq!(max_retry_from_options(&options), 10);
+    options.insert("RetryTimes".into(), "0".into());
+    assert_eq!(max_retry_from_options(&options), 0);
+}
+```
+
+- [ ] **Step 2: 实现 `src/retry.rs`**
+
+```rust
+use std::collections::HashMap;
+use std::time::Duration;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RetryDecision {
+    Retry,
+    Stop,
+}
+
+pub fn decide(status: Option<u16>, attempt: usize, max_retry: usize) -> RetryDecision {
+    if attempt >= max_retry {
+        return RetryDecision::Stop;
+    }
+    match status {
+        None => RetryDecision::Retry,
+        Some(408) | Some(429) | Some(401) | Some(403) => RetryDecision::Retry,
+        Some(status) if status >= 500 => RetryDecision::Retry,
+        Some(_) => RetryDecision::Stop,
+    }
+}
+
+pub fn backoff(status: Option<u16>, attempt: usize) -> Duration {
+    if matches!(status, Some(429) | Some(401) | Some(403)) {
+        return Duration::ZERO;
+    }
+    let shift = attempt.min(4) as u32;
+    let millis = 100u64.saturating_mul(1u64 << shift).min(1000);
+    Duration::from_millis(millis)
+}
+
+pub fn max_retry_from_options(options: &HashMap<String, String>) -> usize {
+    options.get("RetryTimes")
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(3)
+        .min(10)
+}
+```
+
+- [ ] **Step 3: `src/lib.rs` 增加 `pub mod retry;`**
+
+- [ ] **Step 4: 运行测试**
+
+Run: `cargo test --test retry`
+Expected: PASS。
+
+- [ ] **Step 5: 全量回归并提交（主代理）**
+
+Run: `cargo test`
+Expected: 全绿。
+
+```bash
+git add src/retry.rs src/lib.rs tests/retry.rs
+git commit -m "feat(m2): retry decisions and backoff"
+```
