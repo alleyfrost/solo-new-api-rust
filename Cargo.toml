@@ -26,6 +26,7 @@ hyper = "1"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream", "json"] }
 async-stream = "0.3"
 tokio-stream = "0.1"
+switchyard-translation = { path = "vendor/switchyard-translation" }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

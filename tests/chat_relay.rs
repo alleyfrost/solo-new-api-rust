@@ -22,6 +22,7 @@ struct Fixture {
 async fn setup(
     base_url: &str,
     keys: &str,
+    channel_type: i64,
     mapping: Option<&str>,
     overrides: Option<&str>,
 ) -> Fixture {
@@ -80,7 +81,7 @@ async fn setup(
         3,
         ChannelRow {
             id: 3,
-            r#type: 1,
+            r#type: channel_type,
             key: keys.into(),
             status: 1,
             name: "c".into(),
@@ -124,6 +125,14 @@ async fn setup(
             "/v1/chat/completions",
             axum::routing::post(solo_new_api_rust::relay::chat::chat_completions),
         )
+        .route(
+            "/v1/messages",
+            axum::routing::post(solo_new_api_rust::relay::messages::messages),
+        )
+        .route(
+            "/v1/responses",
+            axum::routing::post(solo_new_api_rust::relay::responses::responses),
+        )
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
             solo_new_api_rust::auth::token::token_auth,
@@ -133,12 +142,16 @@ async fn setup(
 }
 
 async fn send(fixture: Fixture, body: &str) -> (u16, Bytes, SqlitePool) {
+    send_to(fixture, "/v1/chat/completions", body).await
+}
+
+async fn send_to(fixture: Fixture, path: &str, body: &str) -> (u16, Bytes, SqlitePool) {
     let Fixture { app, pool, writer } = fixture;
     let res = app
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/v1/chat/completions")
+                .uri(path)
                 .header("authorization", "Bearer sk-abc123")
                 .header("content-type", "application/json")
                 .body(Body::from(body.to_string()))
@@ -172,7 +185,7 @@ async fn non_stream_forwards_and_logs_usage() {
         .mount(&server)
         .await;
 
-    let fixture = setup(&server.uri(), "sk-up", None, None).await;
+    let fixture = setup(&server.uri(), "sk-up", 1, None, None).await;
     let (status, body, pool) = send(
         fixture,
         r#"{"model":"m1","messages":[{"role":"user","content":"hi"}]}"#,
@@ -207,6 +220,7 @@ async fn mapping_and_header_override_apply_upstream() {
     let fixture = setup(
         &server.uri(),
         "sk-up",
+        1,
         Some(r#"{"m1":"up-m1"}"#),
         Some(r#"{"X-Custom":"v"}"#),
     )
@@ -234,7 +248,7 @@ async fn rate_limit_rotates_key_and_retries() {
         .mount(&server)
         .await;
 
-    let fixture = setup(&server.uri(), "k1\nk2", None, None).await;
+    let fixture = setup(&server.uri(), "k1\nk2", 1, None, None).await;
     let (status, _, _) = send(fixture, r#"{"model":"m1","messages":[]}"#).await;
     assert_eq!(status, 200);
     let reqs = server.received_requests().await.unwrap();
@@ -255,7 +269,7 @@ async fn client_error_is_not_retried_and_forwarded() {
         .mount(&server)
         .await;
 
-    let fixture = setup(&server.uri(), "sk-up", None, None).await;
+    let fixture = setup(&server.uri(), "sk-up", 1, None, None).await;
     let (status, body, _) = send(fixture, r#"{"model":"m1","messages":[]}"#).await;
     assert_eq!(status, 400);
     assert!(String::from_utf8_lossy(&body).contains("bad request"));
@@ -278,7 +292,7 @@ async fn stream_tap_hides_usage_and_logs_tokens() {
         .mount(&server)
         .await;
 
-    let fixture = setup(&server.uri(), "sk-up", None, None).await;
+    let fixture = setup(&server.uri(), "sk-up", 1, None, None).await;
     let (status, body, pool) = send(
         fixture,
         r#"{"model":"m1","messages":[],"stream":true}"#,
@@ -318,7 +332,7 @@ async fn stream_keeps_usage_when_client_requests_it() {
         .mount(&server)
         .await;
 
-    let fixture = setup(&server.uri(), "sk-up", None, None).await;
+    let fixture = setup(&server.uri(), "sk-up", 1, None, None).await;
     let (status, body, _) = send(
         fixture,
         r#"{"model":"m1","messages":[],"stream":true,"stream_options":{"include_usage":true}}"#,
@@ -326,4 +340,168 @@ async fn stream_keeps_usage_when_client_requests_it() {
     .await;
     assert_eq!(status, 200);
     assert!(String::from_utf8_lossy(&body).contains("prompt_tokens"));
+}
+
+#[tokio::test]
+async fn anthropic_client_translates_to_chat_upstream() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(ok_json())
+        .mount(&server)
+        .await;
+
+    let fixture = setup(&server.uri(), "sk-up", 1, None, None).await;
+    let (status, body, pool) = send_to(
+        fixture,
+        "/v1/messages",
+        r#"{"model":"m1","max_tokens":100,"messages":[{"role":"user","content":"hi"}]}"#,
+    )
+    .await;
+    assert_eq!(status, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["type"], "message");
+    assert_eq!(v["content"][0]["type"], "text");
+    assert_eq!(v["content"][0]["text"], "hi");
+
+    let reqs = server.received_requests().await.unwrap();
+    assert_eq!(reqs.len(), 1);
+    let sent: serde_json::Value = serde_json::from_slice(&reqs[0].body).unwrap();
+    assert_eq!(sent["model"], "m1");
+    assert_eq!(sent["messages"][0]["content"], "hi");
+
+    let (pt, ct): (i64, i64) = sqlx::query_as(
+        "SELECT COALESCE(SUM(prompt_tokens),0), COALESCE(SUM(completion_tokens),0) FROM logs",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!((pt, ct), (10, 5));
+}
+
+#[tokio::test]
+async fn anthropic_stream_translates_from_chat_upstream() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(
+                    "data: {\"id\":\"x\",\"model\":\"m1\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"hi\"},\"finish_reason\":null}]}\n\n\
+                     data: {\"id\":\"x\",\"model\":\"m1\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":2}}\n\n\
+                     data: [DONE]\n\n",
+                ),
+        )
+        .mount(&server)
+        .await;
+
+    let fixture = setup(&server.uri(), "sk-up", 1, None, None).await;
+    let (status, body, pool) = send_to(
+        fixture,
+        "/v1/messages",
+        r#"{"model":"m1","max_tokens":100,"stream":true,"messages":[{"role":"user","content":"hi"}]}"#,
+    )
+    .await;
+    assert_eq!(status, 200);
+    let text = String::from_utf8_lossy(&body).to_string();
+    assert!(text.contains("event: message_start"), "{text}");
+    assert!(text.contains("event: content_block_delta"), "{text}");
+    assert!(text.contains("event: message_stop"), "{text}");
+    assert!(text.contains("\"text\":\"hi\""), "{text}");
+
+    let (pt, ct): (i64, i64) = sqlx::query_as(
+        "SELECT COALESCE(SUM(prompt_tokens),0), COALESCE(SUM(completion_tokens),0) FROM logs",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!((pt, ct), (1, 2));
+}
+
+#[tokio::test]
+async fn responses_client_translates_to_chat_upstream() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ok_json())
+        .mount(&server)
+        .await;
+
+    let fixture = setup(&server.uri(), "sk-up", 1, None, None).await;
+    let (status, body, _) = send_to(
+        fixture,
+        "/v1/responses",
+        r#"{"model":"m1","input":"hi"}"#,
+    )
+    .await;
+    assert_eq!(status, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let text: String = v["output"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|item| item["content"].as_array())
+        .flatten()
+        .filter_map(|part| part["text"].as_str())
+        .collect();
+    assert_eq!(text, "hi");
+    assert_eq!(v["usage"]["input_tokens"], 10);
+    assert_eq!(v["usage"]["output_tokens"], 5);
+}
+
+#[tokio::test]
+async fn anthropic_upstream_passthrough_uses_x_api_key() {
+    let server = MockServer::start().await;
+    let anthropic_body = r#"{"id":"msg_1","type":"message","role":"assistant","model":"m1","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":3,"output_tokens":4}}"#;
+    Mock::given(method("POST"))
+        .and(path("/v1/messages"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "application/json")
+                .set_body_string(anthropic_body),
+        )
+        .mount(&server)
+        .await;
+
+    let fixture = setup(&server.uri(), "sk-up", 14, None, None).await;
+    let (status, body, _) = send_to(
+        fixture,
+        "/v1/messages",
+        r#"{"model":"m1","max_tokens":100,"messages":[{"role":"user","content":"hi"}]}"#,
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(body, Bytes::from(anthropic_body));
+
+    let reqs = server.received_requests().await.unwrap();
+    assert_eq!(reqs[0].headers["x-api-key"], "sk-up");
+    assert!(!reqs[0].headers.contains_key("authorization"));
+}
+
+#[tokio::test]
+async fn chat_client_translates_to_anthropic_upstream() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/messages"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "application/json")
+                .set_body_string(
+                    r#"{"id":"msg_1","type":"message","role":"assistant","model":"m1","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":3,"output_tokens":4}}"#,
+                ),
+        )
+        .mount(&server)
+        .await;
+
+    let fixture = setup(&server.uri(), "sk-up", 14, None, None).await;
+    let (status, body, _) = send(fixture, r#"{"model":"m1","messages":[{"role":"user","content":"hi"}]}"#).await;
+    assert_eq!(status, 200);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["choices"][0]["message"]["content"], "hi");
+    assert_eq!(v["usage"]["prompt_tokens"], 3);
+    assert_eq!(v["usage"]["completion_tokens"], 4);
+
+    let reqs = server.received_requests().await.unwrap();
+    assert_eq!(reqs[0].headers["x-api-key"], "sk-up");
+    let sent: serde_json::Value = serde_json::from_slice(&reqs[0].body).unwrap();
+    assert_eq!(sent["model"], "m1");
 }

@@ -1,0 +1,177 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+//! Routed-call client contracts and shared error types.
+//!
+//! Hosts implement these traits to perform model calls. Keeping the contracts here
+//! lets clients depend on the protocol without pulling in libsy's orchestration.
+
+use async_trait::async_trait;
+use thiserror::Error;
+
+use crate::{DecisionRequest, DecisionResponse, ModelId, Request, Response};
+
+/// A boxed client-specific error preserved as the source of a routed call failure.
+pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
+
+/// Failures a routed LLM client can surface to its caller.
+///
+/// Boxed sources preserve client-specific errors; `General` keeps only a message.
+#[non_exhaustive]
+#[derive(Debug, Error)]
+pub enum LlmClientError {
+    /// The request cannot be served as supplied.
+    #[error("invalid request: {message}")]
+    InvalidRequest {
+        /// Human-readable request validation failure.
+        message: String,
+    },
+
+    /// Decoding the inbound request failed in the translation engine.
+    #[error("request translation failed: {0}")]
+    RequestTranslation(String),
+
+    /// Encoding the request for the upstream failed in the translation engine.
+    #[error("outbound request encoding failed: {0}")]
+    RequestEncoding(String),
+
+    /// Decoding or encoding the response failed in the translation engine.
+    #[error("response translation failed: {0}")]
+    ResponseTranslation(String),
+
+    /// The client is not configured to serve the selected target.
+    #[error("client configuration error: {message}")]
+    Configuration {
+        /// Human-readable configuration failure.
+        message: String,
+    },
+
+    /// The route cannot record another provider-owned response or conversation ID.
+    #[error(
+        "Responses state tracking reached its limit of {limit} IDs; no existing records were removed"
+    )]
+    ResponseStateLimitExceeded {
+        /// Maximum number of IDs retained by this route.
+        limit: usize,
+    },
+
+    /// Two configured models reported the same saved response or conversation ID.
+    #[error("Responses state ID is already recorded for another model; its owner was not changed")]
+    ResponseStateConflict,
+
+    /// The selected backend is temporarily unavailable. Another candidate may serve the request.
+    #[error("backend temporarily unavailable")]
+    TemporarilyUnavailable,
+
+    /// The upstream could not be reached or the request could not be sent.
+    #[error("upstream transport error: {source}")]
+    Transport {
+        /// Client-specific transport failure.
+        #[source]
+        source: BoxError,
+    },
+
+    /// The upstream request exceeded its timeout.
+    #[error("upstream request timed out: {source}")]
+    Timeout {
+        /// Client-specific timeout failure.
+        #[source]
+        source: BoxError,
+    },
+
+    /// The upstream rejected the request because it exceeds the model's context window.
+    #[error("context window exceeded for model {model}: {message}")]
+    ContextWindowExceeded {
+        /// Model whose context window was exceeded.
+        model: ModelId,
+        /// Upstream error message.
+        message: String,
+    },
+
+    /// The upstream returned a non-success HTTP response.
+    #[error("upstream returned HTTP {status}: {body}")]
+    UpstreamHttp {
+        /// Upstream HTTP status code.
+        status: http::StatusCode,
+        /// Raw upstream error body.
+        body: String,
+    },
+
+    /// The upstream returned a response the client could not decode.
+    #[error("invalid upstream response: {source}")]
+    InvalidResponse {
+        /// Client-specific decoding or validation failure.
+        #[source]
+        source: BoxError,
+    },
+
+    /// A native host failure that does not fit another category.
+    /// The default completion runner treats it as terminal.
+    #[error("host client error: {source}")]
+    Host {
+        /// Original error, retained for the host.
+        #[source]
+        source: BoxError,
+    },
+
+    /// A call across a foreign-function boundary (e.g. a Python-implemented client)
+    /// failed. The boxed source is the foreign error itself.
+    #[error("foreign function interface error: {source}")]
+    Ffi {
+        /// Foreign-language failure, preserved verbatim.
+        #[source]
+        source: BoxError,
+    },
+
+    /// A string-only failure. Useful in testing; prefer a typed variant when possible.
+    #[error("{0}")]
+    General(String),
+}
+
+/// Why routing replaced a selected target with another eligible target.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RoutingFallbackReason {
+    /// The selected target rejected the request because its context window was too small.
+    ContextWindow,
+    /// The selected target was unavailable after its client retries finished.
+    Unavailable,
+}
+
+impl RoutingFallbackReason {
+    /// Stable value used when logging a routing fallback.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ContextWindow => "context_window",
+            Self::Unavailable => "unavailable",
+        }
+    }
+}
+
+/// Performs the actual model call for a target. This is the one piece of I/O the
+/// library does not own — a host implements it over its own transport (HTTP SDK,
+/// in-process model, mock). It serves a call the stream consumer chose not to
+/// override, reached as a routed request's `default_client`.
+///
+/// # Concurrency
+///
+/// A client may be shared by many targets and concurrent algorithm runs. Calls may
+/// overlap, so implementations must synchronize mutable state internally and should
+/// not serialize requests unless their transport requires it.
+#[async_trait]
+pub trait RoutedLlmClient: Send + Sync {
+    /// Resolves a routing key for telemetry. Direct model clients keep the key unchanged.
+    fn provider_model<'a>(&'a self, target: &'a ModelId) -> &'a ModelId {
+        target
+    }
+
+    /// Make a request
+    async fn call(&self, request: Request) -> Result<Response, LlmClientError>;
+}
+
+/// Serves typed decision calls over a host-owned transport.
+/// Implementations may be shared across targets and called concurrently.
+#[async_trait]
+pub trait RoutedDecisionClient: Send + Sync {
+    /// Evaluate the request using its selected model.
+    async fn call(&self, request: DecisionRequest) -> Result<DecisionResponse, LlmClientError>;
+}

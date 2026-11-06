@@ -1,0 +1,24 @@
+[package]
+name = "switchyard-translation"
+version = "0.3.0"
+description = "Pure Rust request, response, and stream translation for Switchyard"
+authors = ["NVIDIA Corporation"]
+edition = "2024"
+homepage = "https://github.com/NVIDIA-NeMo/Switchyard"
+license = "Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/NVIDIA-NeMo/Switchyard"
+rust-version = "1.96.0"
+keywords = ["llm", "translation", "openai", "anthropic"]
+publish = false
+
+[dependencies]
+http = "1"
+base64 = "0.22"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+switchyard-protocol = { path = "../switchyard-protocol", version = "0.3.0" }
+thiserror = "2"
+futures = "0.3"
+async-stream = "0.3"
+tracing = { version = "0.1", default-features = false, features = ["attributes", "std"] }

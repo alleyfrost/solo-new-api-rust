@@ -1,0 +1,22 @@
+[package]
+name = "switchyard-protocol"
+version = "0.3.0"
+description = "Provider-neutral LLM protocol types for Switchyard"
+authors = ["NVIDIA Corporation"]
+edition = "2024"
+homepage = "https://github.com/NVIDIA-NeMo/Switchyard"
+license = "Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/NVIDIA-NeMo/Switchyard"
+rust-version = "1.96.0"
+keywords = ["llm", "protocol", "openai", "anthropic"]
+publish = false
+
+[dependencies]
+async-trait = "0.1.92"
+futures = "0.3"
+http = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+strum_macros = "0.28"
+thiserror = "2"

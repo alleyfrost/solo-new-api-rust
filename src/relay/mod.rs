@@ -34,6 +34,13 @@ pub fn usage_from_json(root: &Value) -> Option<Usage> {
     })
 }
 
+/// 兼容 Anthropic 的 `message.usage` 与 Responses 的 `response.usage` 包装。
+pub fn usage_from_event(root: &Value) -> Option<Usage> {
+    usage_from_json(root)
+        .or_else(|| root.get("message").and_then(usage_from_json))
+        .or_else(|| root.get("response").and_then(usage_from_json))
+}
+
 /// 渠道 `model_mapping` 是“请求模型 -> 上游模型”的链式映射；循环时退回原始模型。
 pub fn map_model(origin: &str, mapping: Option<&str>) -> String {
     let Some(map) = mapping
@@ -83,25 +90,41 @@ pub fn openai_error(status: StatusCode, message: impl Into<String>, kind: &str) 
         .into_response()
 }
 
-#[derive(Default)]
-struct BlockInfo {
-    usage: Option<Usage>,
-    usage_only: bool,
+pub fn anthropic_error(status: StatusCode, message: impl Into<String>, kind: &str) -> Response {
+    (
+        status,
+        axum::Json(json!({
+            "type": "error",
+            "error": { "type": kind, "message": message.into() }
+        })),
+    )
+        .into_response()
 }
 
-/// 逐事件扫描 SSE：只缓存一个事件，把 usage 增量抽取出来，不缓存完整响应。
-pub struct SseTap {
+#[derive(Debug)]
+pub struct ScannedEvent {
+    pub raw: Vec<u8>,
+    pub data: Option<Value>,
+    pub usage_only: bool,
+}
+
+/// 按 SSE 事件边界切分字节流；只缓存一个事件，逐个产出，避免整段响应滞留内存。
+pub struct SseScanner {
     buf: Vec<u8>,
     usage: Usage,
-    wants_usage: bool,
 }
 
-impl SseTap {
-    pub fn new(wants_usage: bool) -> Self {
+impl Default for SseScanner {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SseScanner {
+    pub fn new() -> Self {
         Self {
             buf: Vec::new(),
             usage: Usage::default(),
-            wants_usage,
         }
     }
 
@@ -109,9 +132,16 @@ impl SseTap {
         self.usage
     }
 
-    fn inspect(block: &[u8]) -> BlockInfo {
+    fn emit_usage(&mut self, usage: Option<Usage>) {
+        if let Some(u) = usage {
+            self.usage.prompt_tokens = self.usage.prompt_tokens.max(u.prompt_tokens);
+            self.usage.completion_tokens = self.usage.completion_tokens.max(u.completion_tokens);
+        }
+    }
+
+    fn scan_block(mut raw: Vec<u8>) -> ScannedEvent {
         let mut data: Vec<u8> = Vec::new();
-        for line in block.split(|&b| b == b'\n') {
+        for line in raw.split(|&b| b == b'\n') {
             let line = line.strip_suffix(b"\r").unwrap_or(line);
             if let Some(rest) = line.strip_prefix(b"data:") {
                 let rest = rest.strip_prefix(b" ").unwrap_or(rest);
@@ -122,60 +152,110 @@ impl SseTap {
             }
         }
         if data.is_empty() || data == b"[DONE]" {
-            return BlockInfo::default();
+            return ScannedEvent {
+                raw,
+                data: None,
+                usage_only: false,
+            };
         }
         let Ok(value) = serde_json::from_slice::<Value>(&data) else {
-            return BlockInfo::default();
+            return ScannedEvent {
+                raw,
+                data: None,
+                usage_only: false,
+            };
         };
-        let usage = usage_from_json(&value);
+        let usage = usage_from_event(&value);
         let usage_only = usage.is_some()
             && value
                 .get("choices")
                 .and_then(Value::as_array)
                 .map(|a| a.is_empty())
                 .unwrap_or(true);
-        BlockInfo {
-            usage,
+        ScannedEvent {
+            raw: std::mem::take(&mut raw),
+            data: Some(value),
             usage_only,
         }
     }
 
-    pub fn feed(&mut self, chunk: &[u8]) -> Vec<u8> {
+    pub fn feed(&mut self, chunk: &[u8]) -> Vec<ScannedEvent> {
         self.buf.extend_from_slice(chunk);
         let mut out = Vec::new();
         loop {
             let Some((idx, sep)) = find_boundary(&self.buf) else {
                 if self.buf.len() > MAX_EVENT {
-                    out.append(&mut self.buf);
+                    out.push(ScannedEvent {
+                        raw: std::mem::take(&mut self.buf),
+                        data: None,
+                        usage_only: false,
+                    });
                 }
                 break;
             };
             let block: Vec<u8> = self.buf.drain(..idx + sep).collect();
-            let info = Self::inspect(&block);
-            if let Some(u) = info.usage {
-                self.usage = u;
+            let event = Self::scan_block(block);
+            if event.data.is_some() {
+                let usage = event.data.as_ref().and_then(usage_from_event);
+                self.emit_usage(usage);
             }
-            if info.usage_only && !self.wants_usage {
+            out.push(event);
+        }
+        out
+    }
+
+    pub fn finish(&mut self) -> Vec<ScannedEvent> {
+        let tail = std::mem::take(&mut self.buf);
+        if tail.is_empty() {
+            return Vec::new();
+        }
+        let event = Self::scan_block(tail);
+        if event.data.is_some() {
+            let usage = event.data.as_ref().and_then(usage_from_event);
+            self.emit_usage(usage);
+        }
+        vec![event]
+    }
+}
+
+/// Chat 同格式转发用：按事件转发原始字节，并按需隐藏 usage-only 事件。
+pub struct SseTap {
+    scanner: SseScanner,
+    wants_usage: bool,
+}
+
+impl SseTap {
+    pub fn new(wants_usage: bool) -> Self {
+        Self {
+            scanner: SseScanner::new(),
+            wants_usage,
+        }
+    }
+
+    pub fn usage(&self) -> Usage {
+        self.scanner.usage()
+    }
+
+    pub fn feed(&mut self, chunk: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        for event in self.scanner.feed(chunk) {
+            if event.usage_only && !self.wants_usage {
                 continue;
             }
-            out.extend_from_slice(&block);
+            out.extend_from_slice(&event.raw);
         }
         out
     }
 
     pub fn finish(&mut self) -> Vec<u8> {
-        let tail = std::mem::take(&mut self.buf);
-        if tail.is_empty() {
-            return tail;
+        let mut out = Vec::new();
+        for event in self.scanner.finish() {
+            if event.usage_only && !self.wants_usage {
+                continue;
+            }
+            out.extend_from_slice(&event.raw);
         }
-        let info = Self::inspect(&tail);
-        if let Some(u) = info.usage {
-            self.usage = u;
-        }
-        if info.usage_only && !self.wants_usage {
-            return Vec::new();
-        }
-        tail
+        out
     }
 }
 
@@ -192,3 +272,6 @@ fn find_boundary(buf: &[u8]) -> Option<(usize, usize)> {
 }
 
 pub mod chat;
+pub mod forward;
+pub mod messages;
+pub mod responses;

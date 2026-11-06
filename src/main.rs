@@ -47,6 +47,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/v1/chat/completions",
             axum::routing::post(solo_new_api_rust::relay::chat::chat_completions),
         )
+        .route(
+            "/v1/messages",
+            axum::routing::post(solo_new_api_rust::relay::messages::messages),
+        )
+        .route(
+            "/v1/responses",
+            axum::routing::post(solo_new_api_rust::relay::responses::responses),
+        )
         .layer(axum::extract::DefaultBodyLimit::max(
             config.max_request_bytes,
         ))
