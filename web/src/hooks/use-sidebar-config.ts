@@ -40,31 +40,17 @@ const DEFAULT_SIDEBAR_MODULES: SidebarModulesAdminConfig = {
   chat: {
     enabled: true,
     playground: true,
-    chat: true,
   },
   console: {
     enabled: true,
     detail: true,
     token: true,
     log: true,
-    audit: true,
-    midjourney: true,
-    task: true,
-  },
-  personal: {
-    enabled: true,
-    topup: true,
-    personal: true,
-    security: true,
   },
   admin: {
     enabled: true,
     channel: true,
     models: true,
-    redemption: true,
-    user: true,
-    setting: true,
-    subscription: true,
   },
 }
 
@@ -101,25 +87,14 @@ const URL_TO_CONFIG_MAP: Record<string, { section: string; module: string }> = {
   '/dashboard': { section: 'console', module: 'detail' },
   '/dashboard/overview': { section: 'console', module: 'detail' },
   '/dashboard/models': { section: 'console', module: 'detail' },
+  '/dashboard/flow': { section: 'console', module: 'detail' },
   '/dashboard/users': { section: 'console', module: 'detail' },
   '/keys': { section: 'console', module: 'token' },
   '/usage-logs': { section: 'console', module: 'log' },
   '/usage-logs/common': { section: 'console', module: 'log' },
-  '/usage-logs/audit': { section: 'console', module: 'audit' },
-  '/usage-logs/drawing': { section: 'console', module: 'midjourney' },
-  '/usage-logs/task': { section: 'console', module: 'task' },
-  '/wallet': { section: 'personal', module: 'topup' },
-  '/profile': { section: 'personal', module: 'personal' },
-  '/security': { section: 'personal', module: 'security' },
   '/channels': { section: 'admin', module: 'channel' },
   '/models': { section: 'admin', module: 'models' },
   '/models/metadata': { section: 'admin', module: 'models' },
-  '/models/deployments': { section: 'admin', module: 'models' },
-  '/users': { section: 'admin', module: 'user' },
-  '/redemption-codes': { section: 'admin', module: 'redemption' },
-  '/subscriptions': { section: 'admin', module: 'subscription' },
-  '/system-settings': { section: 'admin', module: 'setting' },
-  '/system-settings/site': { section: 'admin', module: 'setting' },
 }
 
 /**
@@ -300,24 +275,4 @@ export function useSidebarConfig(navGroups: NavGroup[]): NavGroup[] {
   )
 
   return filteredNavGroups
-}
-
-/**
- * Check whether a single route is visible under the current sidebar_modules
- * config. Used by entries living outside the sidebar (e.g. the profile
- * dropdown's wallet link) so they honour the same "wallet display" toggle.
- */
-export function useIsSidebarModuleVisible(url: string): boolean {
-  const { status } = useStatus()
-  const { auth } = useAuthStore()
-
-  const adminConfig = parseSidebarConfig(
-    status?.SidebarModulesAdmin as string | null | undefined
-  )
-  const userConfig =
-    auth?.user?.permissions?.sidebar_settings === false
-      ? null
-      : parseUserSidebarConfig(auth?.user?.sidebar_modules)
-
-  return isModuleEnabled(url, adminConfig, userConfig)
 }

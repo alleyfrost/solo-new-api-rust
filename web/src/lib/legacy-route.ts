@@ -21,32 +21,12 @@ const legacyOrigin = 'https://legacy-route.invalid'
 const legacyConsoleRoutes: Record<string, string> = {
   '/console': '/dashboard',
   '/console/models': '/models',
-  '/console/deployment': '/models/deployments',
-  '/console/subscription': '/subscriptions',
+  '/console/deployment': '/models/metadata',
   '/console/channel': '/channels',
   '/console/token': '/keys',
   '/console/playground': '/playground',
-  '/console/redemption': '/redemption-codes',
-  '/console/user': '/users',
   '/console/personal': '/profile',
   '/console/log': '/usage-logs',
-  '/console/midjourney': '/usage-logs/drawing',
-  '/console/task': '/usage-logs/task',
-}
-
-const legacySettingsTabs: Record<string, string> = {
-  operation: '/system-settings/operations/behavior',
-  dashboard: '/system-settings/content/dashboard',
-  chats: '/system-settings/content/chat',
-  drawing: '/system-settings/content/drawing',
-  payment: '/system-settings/billing/payment',
-  ratio: '/system-settings/billing/model-pricing',
-  ratelimit: '/system-settings/security/rate-limit',
-  models: '/system-settings/models/global',
-  'model-deployment': '/system-settings/models/model-deployment',
-  performance: '/system-settings/operations/performance',
-  system: '/system-settings/site/system-info',
-  other: '/system-settings/site/system-info',
 }
 
 function normalizeLegacyPath(pathname: string): string {
@@ -77,21 +57,6 @@ export function resolveLegacyRoute(rawHref: string): string | null {
   }
   if (pathname === '/forbidden') {
     return buildTargetHref('/403', source)
-  }
-  if (pathname === '/console/topup') {
-    return buildTargetHref('/wallet', source)
-  }
-  if (pathname === '/console/setting') {
-    const tab = source.searchParams.get('tab') ?? ''
-    const target = legacySettingsTabs[tab] ?? '/system-settings'
-    return buildTargetHref(target, source)
-  }
-  if (pathname === '/console/chat') {
-    return buildTargetHref('/dashboard', source)
-  }
-  if (pathname.startsWith('/console/chat/')) {
-    const chatID = pathname.slice('/console/chat/'.length)
-    return buildTargetHref(chatID ? `/chat/${chatID}` : '/dashboard', source)
   }
 
   const target = legacyConsoleRoutes[pathname]

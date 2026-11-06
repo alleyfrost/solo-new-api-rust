@@ -29,7 +29,6 @@ import {
   Gauge,
   Info,
   Loader2,
-  Settings,
   Trash2,
 } from 'lucide-react'
 import {
@@ -200,7 +199,6 @@ const STREAM_INCOMPATIBLE_ENDPOINTS = new Set([
   'openai-response-compact',
 ])
 
-const MODEL_PRICE_ERROR_CODE = 'model_price_error'
 const FAILURE_SUMMARY_MAX_LENGTH = 96
 const BATCH_TEST_CONCURRENCY = 5
 const BATCH_TEST_DELAY_MS = 100
@@ -242,25 +240,14 @@ function truncateFailureSummary(summary: string) {
 function getFailureStatusDisplay({
   errorText,
   fallbackSummary,
-  isModelPriceError,
-  modelPriceSummary,
 }: {
   errorText?: string
   fallbackSummary: string
-  isModelPriceError: boolean
-  modelPriceSummary: string
 }): FailureStatusDisplay {
   const rawError = errorText?.trim()
 
   if (!rawError) {
     return { summary: fallbackSummary }
-  }
-
-  if (isModelPriceError) {
-    return {
-      summary: modelPriceSummary,
-      details: rawError === modelPriceSummary ? undefined : rawError,
-    }
   }
 
   const firstLine = getFirstErrorLine(rawError) ?? rawError
@@ -1233,15 +1220,9 @@ function FailureResultContent({
 }) {
   const { t } = useTranslation()
   const errorText = result.error?.trim()
-  const isModelPriceError = result.errorCode === MODEL_PRICE_ERROR_CODE
-  const modelPriceSummary = t(
-    'Model price is not configured. Please complete model pricing in settings.'
-  )
   const { summary, details } = getFailureStatusDisplay({
     errorText,
     fallbackSummary: t('Test failed'),
-    isModelPriceError,
-    modelPriceSummary,
   })
 
   return (
@@ -1250,19 +1231,6 @@ function FailureResultContent({
         {summary}
       </p>
       <div className='flex shrink-0 flex-wrap items-center justify-end gap-1.5'>
-        {isModelPriceError && (
-          <Button
-            variant='outline'
-            size='sm'
-            className='h-7 w-fit px-2 text-xs'
-            onClick={() =>
-              window.open('/system-settings/billing/model-pricing', '_blank')
-            }
-          >
-            <Settings className='mr-1 h-3 w-3 shrink-0' />
-            {t('Go to Settings')}
-          </Button>
-        )}
         {details && (
           <Button
             variant='ghost'

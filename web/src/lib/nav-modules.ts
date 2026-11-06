@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import type { QueryClient } from '@tanstack/react-query'
 
-import { readCachedStatus, statusQueryOptions } from '@/lib/status-query'
+import { statusQueryOptions } from '@/lib/status-query'
 
 export type ModuleAccess = { enabled: boolean; requireAuth: boolean }
 
@@ -158,17 +158,6 @@ export function getModuleAccessFromStatus(
 }
 
 /**
- * Read module access synchronously from the persisted status snapshot.
- *
- * For render paths that cannot await, such as deciding whether to show a nav
- * item. Never issues a request; use {@link getModuleAccessForGuard} when the
- * caller can await.
- */
-export function getModuleAccess(module: HeaderNavModule): ModuleAccess {
-  return getModuleAccessFromStatus(readCachedStatus(), module)
-}
-
-/**
  * Resolve module access for a router `beforeLoad` guard.
  *
  * Reads through the shared `['status']` cache, so a guard on a fresh page load
@@ -190,36 +179,5 @@ export async function getModuleAccessForGuard(
     return getModuleAccessFromStatus(status, module)
   } catch {
     return { enabled: false, requireAuth: true }
-  }
-}
-
-/**
- * Whether an admin sidebar entry is enabled by `SidebarModulesAdmin`.
- *
- * Fails open: an absent, blank, or unparsable configuration keeps every module
- * visible, so a status read that has not landed yet cannot blank the sidebar.
- */
-export function isSidebarModuleEnabled(
-  section: string,
-  module: string
-): boolean {
-  const status = readCachedStatus()
-  if (!status) return true
-
-  const raw = status.SidebarModulesAdmin
-  if (!raw || String(raw).trim() === '') return true
-
-  try {
-    const parsed = JSON.parse(String(raw)) as Record<
-      string,
-      Record<string, boolean>
-    >
-    const sectionConfig = parsed[section]
-    if (!sectionConfig) return true
-    if (sectionConfig.enabled === false) return false
-    if (sectionConfig[module] === false) return false
-    return true
-  } catch {
-    return true
   }
 }
