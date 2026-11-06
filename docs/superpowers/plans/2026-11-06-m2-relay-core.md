@@ -529,3 +529,194 @@ Expected: 全绿。
 git add src/retry.rs src/lib.rs tests/retry.rs
 git commit -m "feat(m2): retry decisions and backoff"
 ```
+
+---
+
+## Task 4: 用量日志批量写入与 AppState 扩展
+
+**Files:**
+- Create: `src/logging.rs`
+- Modify: `src/state.rs`、`src/main.rs`、`src/lib.rs`、所有测试的 AppState 构造
+- Test: `tests/log_writer.rs`
+
+**Interfaces:**
+- Produces:
+  - `logging::LogEntry { created_at,user_id,username,token_name,model_name,prompt_tokens,completion_tokens,use_time_secs,is_stream,channel_id,channel_name,token_id,group,ip,request_id,upstream_request_id,other }`
+  - `logging::channel(capacity) -> (mpsc::Sender<LogEntry>, mpsc::Receiver<LogEntry>)`
+  - `logging::spawn_writer(pool, rx) -> JoinHandle<()>`
+  - `logging::enqueue(state: &AppState, entry: LogEntry)`（无 sender 时忽略；`send` 超时 2s 后丢弃并 warn）
+  - `AppState::new(config, pool, caches, jwt_secret, log_tx: Option<Sender<LogEntry>>) -> AppState`，内部构建 `client`、`routing`
+  - `AppState` 新增 `client: reqwest::Client`、`routing: Arc<RoutingState>`、`log_tx: Option<mpsc::Sender<LogEntry>>`
+
+- [ ] **Step 1: 写失败测试 `tests/log_writer.rs`**
+
+```rust
+#[tokio::test]
+async fn batch_writer_inserts_consume_logs() {
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+    sqlx::query("CREATE TABLE logs (id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,created_at INTEGER,type INTEGER,content TEXT,username TEXT,token_name TEXT,model_name TEXT,quota INTEGER,prompt_tokens INTEGER,completion_tokens INTEGER,use_time INTEGER,is_stream NUMERIC,channel_id INTEGER,channel_name TEXT,token_id INTEGER,`group` TEXT,ip TEXT,request_id TEXT,upstream_request_id TEXT,other TEXT)").execute(&pool).await.unwrap();
+    let (tx, rx) = solo_new_api_rust::logging::channel(16);
+    let writer = solo_new_api_rust::logging::spawn_writer(pool.clone(), rx);
+    for i in 0..2 {
+        tx.send(solo_new_api_rust::logging::LogEntry {
+            created_at: 100 + i, user_id: 1, username: "root".into(), token_name: "t".into(),
+            model_name: "m".into(), prompt_tokens: 10, completion_tokens: 5, use_time_secs: 1,
+            is_stream: true, channel_id: 3, channel_name: "c".into(), token_id: 2,
+            group: "default".into(), ip: "127.0.0.1".into(), request_id: format!("r{i}"),
+            upstream_request_id: String::new(), other: "{}".into(),
+        }).await.unwrap();
+    }
+    drop(tx);
+    writer.await.unwrap();
+    let (count, quota, pt): (i64, i64, i64) = sqlx::query_as("SELECT COUNT(*), SUM(quota), SUM(prompt_tokens) FROM logs").fetch_one(&pool).await.unwrap();
+    assert_eq!((count, quota, pt), (2, 0, 20));
+}
+```
+
+- [ ] **Step 2: 实现 `src/logging.rs`**
+
+```rust
+use std::time::Duration;
+use sqlx::SqlitePool;
+use tokio::sync::mpsc;
+
+#[derive(Debug, Clone)]
+pub struct LogEntry {
+    pub created_at: i64,
+    pub user_id: i64,
+    pub username: String,
+    pub token_name: String,
+    pub model_name: String,
+    pub prompt_tokens: i64,
+    pub completion_tokens: i64,
+    pub use_time_secs: i64,
+    pub is_stream: bool,
+    pub channel_id: i64,
+    pub channel_name: String,
+    pub token_id: i64,
+    pub group: String,
+    pub ip: String,
+    pub request_id: String,
+    pub upstream_request_id: String,
+    pub other: String,
+}
+
+pub fn channel(capacity: usize) -> (mpsc::Sender<LogEntry>, mpsc::Receiver<LogEntry>) {
+    mpsc::channel(capacity)
+}
+
+pub fn spawn_writer(pool: SqlitePool, mut rx: mpsc::Receiver<LogEntry>) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut batch: Vec<LogEntry> = Vec::with_capacity(128);
+        loop {
+            match tokio::time::timeout(Duration::from_millis(200), rx.recv()).await {
+                Ok(Some(entry)) => {
+                    batch.push(entry);
+                    while batch.len() < 100 {
+                        match rx.try_recv() {
+                            Ok(entry) => batch.push(entry),
+                            Err(_) => break,
+                        }
+                    }
+                }
+                Ok(None) => {
+                    flush(&pool, &mut batch).await;
+                    break;
+                }
+                Err(_) => {}
+            }
+            if !batch.is_empty() {
+                flush(&pool, &mut batch).await;
+            }
+        }
+    })
+}
+
+async fn flush(pool: &SqlitePool, batch: &mut Vec<LogEntry>) {
+    if batch.is_empty() { return; }
+    let mut tx = match pool.begin().await { Ok(tx) => tx, Err(e) => { tracing::error!("log tx begin: {e}"); batch.clear(); return; } };
+    for e in batch.drain(..) {
+        if let Err(err) = sqlx::query(
+            "INSERT INTO logs (user_id,created_at,type,content,username,token_name,model_name,quota,prompt_tokens,completion_tokens,use_time,is_stream,channel_id,channel_name,token_id,`group`,ip,request_id,upstream_request_id,other) \
+             VALUES (?,?,2,NULL,?,?,?,0,?,?,?,?,?,?,?,?,?,?,?,?)"
+        )
+        .bind(e.user_id).bind(e.created_at).bind(e.username).bind(e.token_name).bind(e.model_name)
+        .bind(e.prompt_tokens).bind(e.completion_tokens).bind(e.use_time_secs).bind(e.is_stream)
+        .bind(e.channel_id).bind(e.channel_name).bind(e.token_id).bind(e.group).bind(e.ip)
+        .bind(e.request_id).bind(e.upstream_request_id).bind(e.other)
+        .execute(&mut *tx).await
+        {
+            tracing::error!("insert log failed: {err}");
+        }
+    }
+    if let Err(e) = tx.commit().await { tracing::error!("log tx commit: {e}"); }
+}
+
+pub async fn enqueue(state: &crate::state::AppState, entry: LogEntry) {
+    let Some(tx) = &state.log_tx else { return; };
+    match tokio::time::timeout(Duration::from_secs(2), tx.send(entry)).await {
+        Ok(Ok(())) => {}
+        Ok(Err(_)) => tracing::warn!("log queue closed; entry dropped"),
+        Err(_) => tracing::warn!("log queue full; entry dropped"),
+    }
+}
+```
+
+- [ ] **Step 3: 扩展 `AppState`**
+
+```rust
+#[derive(Clone)]
+pub struct AppState {
+    pub config: Config,
+    pub pool: SqlitePool,
+    pub caches: Arc<RwLock<Caches>>,
+    pub jwt_secret: Arc<Vec<u8>>,
+    pub client: reqwest::Client,
+    pub routing: Arc<crate::routing::RoutingState>,
+    pub log_tx: Option<tokio::sync::mpsc::Sender<crate::logging::LogEntry>>,
+}
+
+impl AppState {
+    pub fn new(config: Config, pool: SqlitePool, caches: Caches, jwt_secret: Vec<u8>,
+               log_tx: Option<tokio::sync::mpsc::Sender<crate::logging::LogEntry>>) -> Self {
+        Self {
+            config, pool,
+            caches: Arc::new(RwLock::new(caches)),
+            jwt_secret: Arc::new(jwt_secret),
+            client: crate::upstream::build_client(),
+            routing: Arc::new(crate::routing::RoutingState::new()),
+            log_tx,
+        }
+    }
+}
+```
+
+同步把所有测试里的 `AppState { ... }` 改为 `AppState::new(config, pool, caches, secret, None)`（integration_m1、token_auth、admin_login、admin_refresh、models_endpoint、real_db）。
+
+- [ ] **Step 4: `main.rs` 接线**
+
+```rust
+let (log_tx, log_rx) = logging::channel(20_000);
+let writer = logging::spawn_writer(pool.clone(), log_rx);
+let state = state::AppState::new(config.clone(), pool, caches, jwt_secret, Some(log_tx));
+// ... after axum::serve(...).await?;
+drop(app);
+let _ = tokio::time::timeout(std::time::Duration::from_secs(5), writer).await;
+```
+
+`src/lib.rs` 增加 `pub mod logging;`。
+
+- [ ] **Step 5: 运行测试**
+
+Run: `cargo test --test log_writer`
+Expected: PASS。
+
+- [ ] **Step 6: 全量回归并提交（主代理）**
+
+Run: `cargo test`
+Expected: 全绿。
+
+```bash
+git add src tests
+git commit -m "feat(m2): async batch log writer"
+```
