@@ -62,11 +62,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             state.clone(),
             auth::token::token_auth,
         ));
+    let admin_routes = routes::admin::router().route_layer(
+        axum::middleware::from_fn_with_state(state.clone(), auth::admin::admin_auth),
+    );
     let web_dist = config.web_dist.clone();
     let app = axum::Router::new()
         .merge(routes::public_router())
         .merge(login_route)
         .merge(self_route)
+        .merge(admin_routes)
         .merge(relay_routes)
         .with_state(state)
         .fallback_service(solo_new_api_rust::web::spa_service(web_dist));

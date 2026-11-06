@@ -1,6 +1,7 @@
 use axum::Router;
 use crate::state::AppState;
 
+pub mod admin;
 pub mod models;
 pub mod status;
 pub mod user;
