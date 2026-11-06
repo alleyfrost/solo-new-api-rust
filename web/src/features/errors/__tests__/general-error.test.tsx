@@ -63,7 +63,7 @@ function createTestRouter(error: Error | { response: { status: number } }) {
   })
   const broken = createRoute({
     getParentRoute: () => root,
-    path: '/wallet',
+    path: '/keys',
     component: lazyRouteComponent(() => Promise.reject(error)),
   })
   return createRouter({
@@ -88,14 +88,14 @@ test.each([
     const router = createTestRouter(error)
     const view = render(<RouterProvider router={router} />)
     await screen.findByText('Current page')
-    await act(() => router.navigate({ to: '/wallet' }))
+    await act(() => router.navigate({ to: '/keys' }))
     await waitFor(() => expect(reload).toHaveBeenCalledTimes(1))
     view.unmount()
 
     const afterReload = createTestRouter(error)
     render(<RouterProvider router={afterReload} />)
     await screen.findByText('Current page')
-    await act(() => afterReload.navigate({ to: '/wallet' }))
+    await act(() => afterReload.navigate({ to: '/keys' }))
     expect(await screen.findByText(/Oops! Something went wrong/)).toBeVisible()
     expect(screen.queryByText('500')).not.toBeInTheDocument()
     expect(reload).toHaveBeenCalledTimes(1)
@@ -110,14 +110,14 @@ test('failed and repeated intent preloads keep the current page usable until nav
   const router = createTestRouter(error)
   render(<RouterProvider router={router} />)
   await screen.findByText('Current page')
-  await act(() => router.preloadRoute({ to: '/wallet' }))
-  await act(() => router.preloadRoute({ to: '/wallet' }))
+  await act(() => router.preloadRoute({ to: '/keys' }))
+  await act(() => router.preloadRoute({ to: '/keys' }))
   expect(screen.getByText('Current page')).toBeVisible()
   expect(reload).not.toHaveBeenCalled()
   expect(
     screen.queryByText(/Oops! Something went wrong/)
   ).not.toBeInTheDocument()
-  await act(() => router.navigate({ to: '/wallet' }))
+  await act(() => router.navigate({ to: '/keys' }))
   await waitFor(() => expect(reload).toHaveBeenCalledTimes(1))
 })
 
@@ -128,7 +128,7 @@ test.each([undefined, 429, 500])(
     const router = createTestRouter(error)
     render(<RouterProvider router={router} />)
     await screen.findByText('Current page')
-    await act(() => router.navigate({ to: '/wallet' }))
+    await act(() => router.navigate({ to: '/keys' }))
     if (status) {
       expect(
         await screen.findByRole('heading', { name: String(status) })
@@ -161,7 +161,7 @@ test('a chunk failure with blocked session storage shows the error without riski
   const router = createTestRouter(error)
   render(<RouterProvider router={router} />)
   await screen.findByText('Current page')
-  await act(() => router.navigate({ to: '/wallet' }))
+  await act(() => router.navigate({ to: '/keys' }))
   expect(await screen.findByText(/Oops! Something went wrong/)).toBeVisible()
   expect(screen.queryByText('500')).not.toBeInTheDocument()
   expect(reload).not.toHaveBeenCalled()

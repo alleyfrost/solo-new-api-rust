@@ -182,30 +182,16 @@ describe('API key Auto group form mapping', () => {
   })
 })
 
-describe('API key user quota query form mapping', () => {
-  test('lets a new key query the user quota by default', () => {
-    for (const defaultUseAutoGroup of [true, false]) {
-      const defaults = getApiKeyFormDefaultValues(defaultUseAutoGroup)
+describe('API key quota fields stay out of the form', () => {
+  test('the form neither reads nor writes quota', () => {
+    const defaults = getApiKeyFormDefaultValues(false)
 
-      expect(defaults.allow_user_quota_query).toBe(true)
-      expect(transformFormDataToPayload(defaults).allow_user_quota_query).toBe(
-        true
-      )
-    }
+    expect(defaults).not.toHaveProperty('remain_quota_dollars')
+    expect(transformFormDataToPayload(defaults)).not.toHaveProperty(
+      'unlimited_quota'
+    )
+    expect(transformApiKeyToFormDefaults(baseApiKey)).not.toHaveProperty(
+      'unlimited_quota'
+    )
   })
-
-  test.each([true, false])(
-    'keeps the stored value %s when an existing key is edited and saved',
-    (stored) => {
-      const defaults = transformApiKeyToFormDefaults({
-        ...baseApiKey,
-        allow_user_quota_query: stored,
-      })
-
-      expect(defaults.allow_user_quota_query).toBe(stored)
-      expect(transformFormDataToPayload(defaults).allow_user_quota_query).toBe(
-        stored
-      )
-    }
-  )
 })

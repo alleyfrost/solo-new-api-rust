@@ -19,8 +19,6 @@ For commercial licensing, please contact support@quantumnous.com
 import type { TFunction } from 'i18next'
 import { z } from 'zod'
 
-import { parseQuotaFromDollars, quotaUnitsToDollars } from '@/lib/format'
-
 import { DEFAULT_GROUP } from '../constants'
 import type { ApiKey, ApiKeyFormData } from '../types'
 
@@ -35,12 +33,9 @@ export function getApiKeyFormSchema(t: TFunction, maxAutoGroups = 5) {
   return z
     .object({
       name: z.string().min(1, t('Please enter a name')),
-      remain_quota_dollars: z.number().optional(),
       expired_time: z.date().nullable(),
-      unlimited_quota: z.boolean(),
       model_limits: z.array(z.string()),
       allow_ips: z.string().optional(),
-      allow_user_quota_query: z.boolean(),
       group: z.string().optional(),
       auto_groups_mode: z.enum(['inherit', 'custom']),
       auto_groups: z.array(z.string()),
@@ -80,21 +75,6 @@ export function getApiKeyFormSchema(t: TFunction, maxAutoGroups = 5) {
           })
         }
       }
-
-      if (data.unlimited_quota) {
-        return
-      }
-
-      if (
-        data.remain_quota_dollars === undefined ||
-        data.remain_quota_dollars < 0
-      ) {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['remain_quota_dollars'],
-          message: t('Quota must be zero or greater'),
-        })
-      }
     })
 }
 
@@ -106,12 +86,9 @@ export type ApiKeyFormValues = z.infer<ReturnType<typeof getApiKeyFormSchema>>
 
 export const API_KEY_FORM_DEFAULT_VALUES: ApiKeyFormValues = {
   name: '',
-  remain_quota_dollars: 10,
   expired_time: null,
-  unlimited_quota: true,
   model_limits: [],
   allow_ips: '',
-  allow_user_quota_query: true,
   group: DEFAULT_GROUP,
   auto_groups_mode: 'inherit',
   auto_groups: [],
@@ -141,19 +118,15 @@ export function getApiKeyFormDefaultValues(
 export function transformFormDataToPayload(
   data: ApiKeyFormValues
 ): ApiKeyFormData {
+  // 只记用量不记金额：额度类字段不再提交，由服务端取默认值（新建 unlimited）或沿用原值（更新）。
   return {
     name: data.name,
-    remain_quota: data.unlimited_quota
-      ? 0
-      : parseQuotaFromDollars(data.remain_quota_dollars || 0),
     expired_time: data.expired_time
       ? Math.floor(data.expired_time.getTime() / 1000)
       : -1,
-    unlimited_quota: data.unlimited_quota,
     model_limits_enabled: data.model_limits.length > 0,
     model_limits: data.model_limits.join(','),
     allow_ips: data.allow_ips || '',
-    allow_user_quota_query: data.allow_user_quota_query,
     group: data.group || '',
     auto_groups:
       data.group === 'auto' && data.auto_groups_mode === 'custom'
@@ -180,17 +153,12 @@ export function transformApiKeyToFormDefaults(
 
   return {
     name: apiKey.name,
-    remain_quota_dollars: apiKey.unlimited_quota
-      ? 0
-      : quotaUnitsToDollars(apiKey.remain_quota),
     expired_time:
       apiKey.expired_time > 0 ? new Date(apiKey.expired_time * 1000) : null,
-    unlimited_quota: apiKey.unlimited_quota,
     model_limits: apiKey.model_limits
       ? apiKey.model_limits.split(',').filter(Boolean)
       : [],
     allow_ips: apiKey.allow_ips || '',
-    allow_user_quota_query: !!apiKey.allow_user_quota_query,
     group: apiKey.group || DEFAULT_GROUP,
     auto_groups_mode: autoGroupsMode,
     auto_groups: autoGroups,

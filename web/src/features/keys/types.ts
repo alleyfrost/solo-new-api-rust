@@ -84,15 +84,14 @@ export interface SearchApiKeysParams {
   size?: number
 }
 
+/// 额度类字段（remain_quota / unlimited_quota / allow_user_quota_query）不在表单提交：
+/// 只记用量不记金额，新建由服务端取默认额度，更新沿用库中原值。
 export interface ApiKeyFormData {
   name: string
-  remain_quota: number
   expired_time: number
-  unlimited_quota: boolean
   model_limits_enabled: boolean
   model_limits: string
   allow_ips: string
-  allow_user_quota_query: boolean
   group: string
   auto_groups: string[]
   cross_group_retry: boolean

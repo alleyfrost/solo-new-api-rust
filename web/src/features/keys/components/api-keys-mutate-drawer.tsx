@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronDown, KeyRound, Settings2, WalletCards } from 'lucide-react'
+import { ChevronDown, KeyRound, Settings2 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useForm, type SubmitErrorHandler } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
@@ -62,10 +62,8 @@ import {
 } from '@/components/ui/sheet'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
-import { RelatedPolicyLink } from '@/features/system-settings/request-policies/related-policy-link'
 import { useStatus } from '@/hooks/use-status'
 import { getUserModels, getUserGroups } from '@/lib/api'
-import { getCurrencyDisplay, getCurrencyLabel } from '@/lib/currency'
 import { handleServerError } from '@/lib/handle-server-error'
 import {
   requireServerSuccess,
@@ -360,15 +358,7 @@ export function ApiKeysMutateDrawer({
     form.setValue('expired_time', now)
   }
 
-  const { meta: currencyMeta } = getCurrencyDisplay()
-  const currencyLabel = getCurrencyLabel()
-  const tokensOnly = currencyMeta.kind === 'tokens'
-  const quotaLabel = t('Quota ({{currency}})', { currency: currencyLabel })
-  const quotaPlaceholder = tokensOnly
-    ? t('Enter quota in tokens')
-    : t('Enter quota in {{currency}}', { currency: currencyLabel })
   const autoGroupsMode = form.watch('auto_groups_mode')
-  const unlimitedQuota = form.watch('unlimited_quota')
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -499,7 +489,6 @@ export function ApiKeysMutateDrawer({
                           {t(
                             'When enabled, if channels in the current group fail, it will try channels in the next group in order.'
                           )}
-                          <RelatedPolicyLink section='routing' />
                         </FormDescription>
                       </div>
                       <FormControl>
@@ -604,70 +593,6 @@ export function ApiKeysMutateDrawer({
               )}
             </SideDrawerSection>
 
-            <SideDrawerSection>
-              <SideDrawerSectionHeader
-                title={t('Quota Settings')}
-                description={t('Set quota amount and limits')}
-                icon={<WalletCards className='size-4' />}
-                iconTone='success'
-              />
-              {!unlimitedQuota && (
-                <FormField
-                  control={form.control}
-                  name='remain_quota_dollars'
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>{quotaLabel}</FormLabel>
-                      <FormControl>
-                        <Input
-                          {...field}
-                          type='number'
-                          step={tokensOnly ? 1 : 0.01}
-                          placeholder={quotaPlaceholder}
-                          onChange={(e) =>
-                            field.onChange(
-                              Number.parseFloat(e.target.value) || 0
-                            )
-                          }
-                        />
-                      </FormControl>
-                      <FormDescription>
-                        {tokensOnly
-                          ? t('Enter the quota amount in tokens')
-                          : t('Enter the quota amount in {{currency}}', {
-                              currency: currencyLabel,
-                            })}
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              )}
-
-              <FormField
-                control={form.control}
-                name='unlimited_quota'
-                render={({ field }) => (
-                  <FormItem className={sideDrawerSwitchItemClassName()}>
-                    <div className='flex flex-col gap-0.5'>
-                      <FormLabel className='text-sm'>
-                        {t('Unlimited Quota')}
-                      </FormLabel>
-                      <FormDescription className='text-xs'>
-                        {t('Enable unlimited quota for this API key')}
-                      </FormDescription>
-                    </div>
-                    <FormControl>
-                      <Switch
-                        checked={field.value}
-                        onCheckedChange={field.onChange}
-                      />
-                    </FormControl>
-                  </FormItem>
-                )}
-              />
-            </SideDrawerSection>
-
             <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
               <SideDrawerSection>
                 <CollapsibleTrigger
@@ -744,31 +669,6 @@ export function ApiKeysMutateDrawer({
                             )}
                           </FormDescription>
                           <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    <FormField
-                      control={form.control}
-                      name='allow_user_quota_query'
-                      render={({ field }) => (
-                        <FormItem className={sideDrawerSwitchItemClassName()}>
-                          <div className='flex flex-col gap-0.5'>
-                            <FormLabel className='text-sm'>
-                              {t('Allow querying user quota')}
-                            </FormLabel>
-                            <FormDescription className='text-xs'>
-                              {t(
-                                "When enabled, this API key can be used to check your account's remaining and used quota."
-                              )}
-                            </FormDescription>
-                          </div>
-                          <FormControl>
-                            <Switch
-                              checked={field.value}
-                              onCheckedChange={field.onChange}
-                            />
-                          </FormControl>
                         </FormItem>
                       )}
                     />
