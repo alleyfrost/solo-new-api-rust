@@ -24,6 +24,16 @@
 | D5 | 部署：本地编译后上传 | 本地交叉编译 linux/amd64，上传产物，替换现有 Docker 服务 |
 | D6 | 不引入 Redis | 多 Key 轮询、渠道选择、令牌缓存均放进程内；单实例部署 |
 | D7 | 不做内部机制复刻 | Key 轮询只需行为等价，不要求 Redis/多节点一致性 |
+| D8 | 只保证外部兼容 | 不逐行移植 Go 实现；接口行为、数据可读性、故障转移结果等价即可 |
+
+## 2.1 可行性验证（2026-11-06）
+
+| 项目 | 结果 | 说明 |
+| --- | --- | --- |
+| 前端独立构建 | 通过 | 在 `/tmp` 用 bun 1.4.4 + rsbuild 构建成功，未裁剪产物 68 MB |
+| 协议转换库 | 通过 | `switchyard-translation` 0.3.0 源码 vendored 后在 Rust 1.96.0 编译通过；Anthropic Messages → OpenAI Chat 请求转换实测可用 |
+| Rust 1.96.1 | 受阻 | 官方 toolchain 安装报 “Missing manifest”；0.3.0 仅补丁级要求，vendored 后可降到 1.96.0 |
+| 上游可达性 | 通过 | `https://token.sensenova.cn` 可达，无 Key 请求 `/v1/models` 返回 401 |
 
 ## 3. “无缝切换”的验收边界
 
