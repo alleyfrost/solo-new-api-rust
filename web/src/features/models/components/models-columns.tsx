@@ -221,8 +221,12 @@ export function useModelsColumns(
         header: t('Display policy'),
         enableHiding: false,
         enableSorting: false,
-        cell: ({ row }) =>
-          row.original.status === 1 ? t('Allowed') : t('Not listed'),
+        cell: ({ row }) => {
+          const model = row.original
+          // 渠道派生行没有元数据，也就没有展示策略可言。
+          if (model.id <= 0) return '—'
+          return model.status === 1 ? t('Allowed') : t('Not listed')
+        },
       },
       {
         accessorKey: 'id',
