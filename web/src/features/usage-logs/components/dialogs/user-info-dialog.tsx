@@ -83,7 +83,7 @@ export function UserInfoDialog({
       onOpenChange={onOpenChange}
       title={t('User Information')}
       description={t(
-        'View detailed information about this user including usage statistics and invitation details.'
+        'View detailed information about this user including usage statistics.'
       )}
       contentClassName='sm:max-w-lg'
       contentHeight='auto'
@@ -117,24 +117,6 @@ export function UserInfoDialog({
               <InfoItem label={t('User Group')} value={userInfo.group} />
             )}
           </div>
-
-          {/* Invitation Info */}
-          {(userInfo.aff_code || userInfo.aff_count !== undefined) && (
-            <div className='grid grid-cols-2 gap-4'>
-              {userInfo.aff_code && (
-                <InfoItem
-                  label={t('Invitation Code')}
-                  value={userInfo.aff_code}
-                />
-              )}
-              {userInfo.aff_count !== undefined && (
-                <InfoItem
-                  label={t('Invited Users')}
-                  value={formatCompactNumber(userInfo.aff_count)}
-                />
-              )}
-            </div>
-          )}
 
           {/* Remark */}
           {userInfo.remark && (

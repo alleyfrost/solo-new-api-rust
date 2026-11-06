@@ -213,7 +213,5 @@ export interface UserInfo {
   display_name?: string
   request_count: number
   group?: string
-  aff_code?: string
-  aff_count?: number
   remark?: string
 }

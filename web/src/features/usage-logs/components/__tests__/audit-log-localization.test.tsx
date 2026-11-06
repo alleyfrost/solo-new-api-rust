@@ -48,7 +48,7 @@ import type { LogOtherData } from '../../types'
 import { useCommonLogsColumns } from '../columns/common-logs-columns'
 import { DetailsDialog } from '../dialogs/details-dialog'
 
-// Provider icons are unused by quota logs; their browser-only dependencies
+// Provider icons are unused by audit logs; their browser-only dependencies
 // cannot be loaded by Vitest's Node ESM resolver.
 vi.mock('@lobehub/icons', () => ({}))
 
@@ -62,7 +62,7 @@ vi.hoisted(() => {
 
 afterAll(() => vi.unstubAllGlobals())
 
-function QuotaLogPreview(props: { log: UsageLog }) {
+function AuditLogPreview(props: { log: UsageLog }) {
   const table = useReactTable({
     data: [props.log],
     columns: useCommonLogsColumns(false, false),
@@ -72,7 +72,7 @@ function QuotaLogPreview(props: { log: UsageLog }) {
     .getRowModel()
     .rows[0].getAllCells()
     .find((item) => item.column.id === 'content')
-  if (!cell) throw new Error('The quota log must have a content column')
+  if (!cell) throw new Error('The audit log must have a content column')
 
   return (
     <>
@@ -88,6 +88,8 @@ function QuotaLogPreview(props: { log: UsageLog }) {
   )
 }
 
+// Go-era quota operations survive as historical rows. They render with the
+// raw quota units the backend stored, never as a currency amount.
 const cases = [
   {
     action: 'user.quota_add',
@@ -100,34 +102,30 @@ const cases = [
       from: 500000,
       to: 1000000,
     },
-    english:
-      'Increase quota for user “quota-owner” (ID: 42) · Requested quota: $1 · $1 → $2',
-    chinese: '增加用户「quota-owner」的额度（ID: 42） · 请求数额：$1 · $1 → $2',
-  },
-  {
-    action: 'user.quota_add',
-    params: { quota: 500000 },
-    english:
-      'Increase user quota · Target not recorded · Requested quota: $1 · Not recorded → Not recorded',
-    chinese: '增加用户额度 · 目标未记录 · 请求数额：$1 · 未记录 → 未记录',
+    english: 'Increased user quota by 500000',
+    chinese: '增加用户额度 500000',
   },
   {
     action: 'user.quota_subtract',
     params: { quota: 500000 },
-    english:
-      'Decrease user quota · Target not recorded · Requested quota: $1 · Not recorded → Not recorded',
-    chinese: '减少用户额度 · 目标未记录 · 请求数额：$1 · 未记录 → 未记录',
+    english: 'Decreased user quota by 500000',
+    chinese: '减少用户额度 500000',
   },
   {
     action: 'user.quota_override',
     params: { from: 500000, to: 0 },
-    english:
-      'Override user quota · Target not recorded · Requested quota: $0 · $1 → $0',
-    chinese: '覆盖用户额度 · 目标未记录 · 请求数额：$0 · $1 → $0',
+    english: 'Overrode user quota from 500000 to 0',
+    chinese: '覆盖用户额度，从 500000 改为 0',
+  },
+  {
+    action: 'channel.update',
+    params: { name: 'OpenAI', id: 7 },
+    english: 'Updated channel OpenAI (ID: 7)',
+    chinese: '更新渠道 OpenAI（ID: 7）',
   },
 ]
 
-describe('quota adjustment log localization', () => {
+describe('audit log localization', () => {
   const previousConfig = useSystemConfigStore.getState().config
   let queryClient: QueryClient
 
@@ -162,7 +160,7 @@ describe('quota adjustment log localization', () => {
         created_at: 1,
         type: 1,
         content: 'English export fallback',
-        username: 'quota-user',
+        username: 'audit-user',
         token_name: '',
         model_name: '',
         quota: 0,
@@ -175,7 +173,7 @@ describe('quota adjustment log localization', () => {
         token_id: 0,
         group: '',
         ip: '',
-        request_id: 'quota-request',
+        request_id: 'audit-request',
         upstream_request_id: '',
         other: JSON.stringify({
           op: { action: scenario.action, params: scenario.params },
@@ -184,7 +182,7 @@ describe('quota adjustment log localization', () => {
       render(
         <I18nextProvider i18n={i18n}>
           <QueryClientProvider client={queryClient}>
-            <QuotaLogPreview log={log} />
+            <AuditLogPreview log={log} />
           </QueryClientProvider>
         </I18nextProvider>
       )
@@ -203,18 +201,18 @@ describe('quota adjustment log localization', () => {
     }
   )
 
-  test('preserves legacy formatted quota parameters and unknown-action fallback', async () => {
+  test('renders quota units without currency and falls back on unknown actions', async () => {
     const i18n = createInstance()
     await i18n.init({ lng: 'en', resources: { en } })
     const other: LogOtherData = {
       op: {
         action: 'user.quota_add',
-        params: { quota: 'legacy formatted quota' },
+        params: { quota: 500_000 },
       },
     }
-    expect(renderAuditContent(other, i18n.t)).toBe(
-      'Increase user quota · Target not recorded · Requested quota: legacy formatted quota · Not recorded → Not recorded'
-    )
+    const content = renderAuditContent(other, i18n.t)
+    expect(content).toBe('Increased user quota by 500000')
+    expect(content).not.toContain('$')
     expect(
       renderAuditContent({ op: { action: 'unknown', params: {} } }, i18n.t)
     ).toBeNull()

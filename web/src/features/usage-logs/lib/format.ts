@@ -21,7 +21,6 @@ import { translateServerText } from '@/lib/server-error-message'
 
 import type { UsageLog } from '../data/schema'
 import type { LogOtherData } from '../types'
-import { buildQuotaAuditOperation } from './quota-audit-operation'
 
 const PARAM_OVERRIDE_ACTION_MAP: Record<string, string> = {
   set: 'Set',
@@ -363,15 +362,6 @@ export function renderAuditContent(
   if (!op?.action) return null
   const template = AUDIT_TEMPLATES[op.action]
   if (!template) return null
-  const quotaOperation = buildQuotaAuditOperation(
-    op.action,
-    op.params ?? {},
-    other?.audit_info?.success !== false,
-    t
-  )
-  if (quotaOperation) {
-    return `${quotaOperation.summary} · ${quotaOperation.description}`
-  }
   const params = { ...op.params }
   return t(template, params)
 }
