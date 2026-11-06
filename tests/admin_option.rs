@@ -380,6 +380,42 @@ async fn cleanup_deletes_only_older_rows_in_bounded_batches() {
 }
 
 #[tokio::test]
+async fn cleanup_round_can_delete_more_rows_than_sqlite_allows_binds() {
+    // 100_000 行里 created_at 早于 5 天前的有 40_000 行（i % 10 in 6..9；
+    // i % 10 == 5 那批正好落在截止点上，比较是严格小于所以不算）。
+    // 按 id 逐行绑定会超过 SQLite 的 32766 个绑定变量上限，整批清理会退成 500，
+    // 所以删除集必须是子查询而不是 id 列表。
+    let (app, _, pool, now) = setup(100_000).await;
+    let cutoff = now - 5 * DAY_SECS;
+
+    let matched: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM logs WHERE created_at < ?")
+        .bind(cutoff)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(
+        matched > 32_766,
+        "夹具要跨过绑定变量上限才有意义，实际 {matched}"
+    );
+
+    let body = delete(
+        &app,
+        &format!("/api/log/cleanup?before={cutoff}&limit=45000"),
+    )
+    .await;
+    assert_eq!(body["success"], true, "{body}");
+    assert_eq!(body["data"]["deleted"], matched, "{body}");
+    assert_eq!(body["data"]["has_more"], false, "{body}");
+
+    let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM logs WHERE created_at < ?")
+        .bind(cutoff)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 0);
+}
+
+#[tokio::test]
 async fn consume_switch_stops_writing_logs() {
     let (app, _, pool, now) = setup(1).await;
     let (tx, rx) = solo_new_api_rust::logging::channel(8);

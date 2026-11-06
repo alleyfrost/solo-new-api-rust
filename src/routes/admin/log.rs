@@ -406,9 +406,9 @@ pub async fn export_self(
 }
 
 /// 一次清理最多删除的日志行数。分批而不是一条语句删空，
-/// 是为了让长事务不长时间占住 WAL 写锁。
-const CLEAN_DEFAULT_LIMIT: i64 = 50_000;
-const CLEAN_MAX_LIMIT: i64 = 100_000;
+/// 是为了让长事务不长时间占住 WAL 写锁；调用方按 `has_more` 继续推进。
+const CLEAN_DEFAULT_LIMIT: i64 = 5_000;
+const CLEAN_MAX_LIMIT: i64 = 50_000;
 
 #[derive(Deserialize, Default)]
 struct CleanQuery {
@@ -437,31 +437,18 @@ async fn cleanup(
         .filter(|v| *v > 0)
         .unwrap_or(CLEAN_DEFAULT_LIMIT)
         .min(CLEAN_MAX_LIMIT);
-    let ids: Vec<i64> =
-        sqlx::query_scalar("SELECT id FROM logs WHERE created_at < ? ORDER BY id LIMIT ?")
-            .bind(before)
-            .bind(limit)
-            .fetch_all(&state.pool)
-            .await
-            .map_err(internal)?;
 
-    let mut deleted = 0;
-    if !ids.is_empty() {
-        let mut qb: QueryBuilder<'_, Sqlite> = QueryBuilder::new("DELETE FROM logs WHERE id IN (");
-        for (index, id) in ids.iter().enumerate() {
-            if index > 0 {
-                qb.push(",");
-            }
-            qb.push_bind(*id);
-        }
-        qb.push(")");
-        deleted = qb
-            .build()
-            .execute(&state.pool)
-            .await
-            .map_err(internal)?
-            .rows_affected() as i64;
-    }
+    // 批次上限受 SQLite 绑定变量数（现网为 32766）约束，所以删除集用子查询表达：
+    // 一条语句只绑定 before 与 limit 两个变量，行数再多也不会撑爆变量表。
+    let deleted = sqlx::query(
+        "DELETE FROM logs WHERE id IN (SELECT id FROM logs WHERE created_at < ? ORDER BY id LIMIT ?)",
+    )
+    .bind(before)
+    .bind(limit)
+    .execute(&state.pool)
+    .await
+    .map_err(internal)?
+    .rows_affected() as i64;
 
     let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM logs WHERE created_at < ?")
         .bind(before)
