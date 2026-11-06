@@ -196,6 +196,96 @@ async fn multi_key_channel_keeps_newline_keys() {
 }
 
 #[tokio::test]
+async fn copy_channel_clones_routing_and_resets_counters() {
+    let (app, pool, state) = setup().await;
+    let (_, body) = call(
+        &app,
+        "POST",
+        "/api/channel",
+        Some(serde_json::json!({
+            "mode": "single",
+            "channel": {
+                "type": 1, "name": "src", "key": "k1", "status": 1,
+                "models": "m1,m2", "group": "default,vip",
+                "priority": 7, "weight": 3, "balance": 12.5, "used_quota": 400,
+                "test_time": 111, "response_time": 222, "tag": "t1",
+                "settings": {"upstream_model_update_check_enabled": true, "keep_me": 7}
+            }
+        })),
+    )
+    .await;
+    let src = body["data"][0].as_i64().unwrap();
+
+    let (status, copied) = call(&app, "POST", &format!("/api/channel/copy/{src}"), None).await;
+    assert_eq!(status, 200, "{copied}");
+    let clone = copied["data"]["id"].as_i64().unwrap();
+    assert_ne!(clone, src);
+
+    let row: (String, String, i64, i64, i64, i64, f64, i64, Option<String>, String) =
+        sqlx::query_as(
+            "SELECT name, `key`, test_time, response_time, priority, status, balance, used_quota, tag, settings FROM channels WHERE id=?",
+        )
+        .bind(clone)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(row.0, "src_copy");
+    assert_eq!(row.1, "k1");
+    assert_eq!((row.2, row.3), (0, 0));
+    assert_eq!((row.4, row.5), (7, 1));
+    assert_eq!((row.6, row.7), (0.0, 0));
+    assert_eq!(row.8.as_deref(), Some("t1"));
+    let settings: serde_json::Value = serde_json::from_str(&row.9).unwrap();
+    assert_eq!(settings["upstream_model_update_check_enabled"], true);
+    assert_eq!(settings["keep_me"], 7);
+
+    let abilities: Vec<(String, String, i64, Option<i64>, Option<i64>, Option<String>)> =
+        sqlx::query_as(
+            "SELECT `group`, model, enabled, priority, weight, tag FROM abilities WHERE channel_id=? ORDER BY `group`, model",
+        )
+        .bind(clone)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert_eq!(abilities.len(), 4);
+    assert!(
+        abilities
+            .iter()
+            .all(|a| a.2 == 1 && a.3 == Some(7) && a.4 == Some(3) && a.5.as_deref() == Some("t1"))
+    );
+
+    let caches = state.caches.read().unwrap();
+    assert_eq!(caches.channels[&clone].name, "src_copy");
+    assert_eq!(
+        caches.abilities[&("vip".to_string(), "m2".to_string())]
+            .iter()
+            .filter(|a| a.channel_id == clone)
+            .count(),
+        1
+    );
+    drop(caches);
+
+    let (_, with_params) = call(
+        &app,
+        "POST",
+        &format!("/api/channel/copy/{src}?suffix=-2&reset_balance=false"),
+        None,
+    )
+    .await;
+    let second = with_params["data"]["id"].as_i64().unwrap();
+    let row: (String, f64, i64) = sqlx::query_as("SELECT name, balance, used_quota FROM channels WHERE id=?")
+        .bind(second)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(row.0, "src-2");
+    assert_eq!((row.1, row.2), (12.5, 400));
+
+    let (status, missing) = call(&app, "POST", "/api/channel/copy/9999", None).await;
+    assert_eq!(status, 404, "{missing}");
+}
+
+#[tokio::test]
 async fn group_list_returns_group_names() {
     let (_, _pool, state) = setup().await;
     sqlx::query("INSERT INTO abilities VALUES ('default','m1',1,1,0,0,'')")

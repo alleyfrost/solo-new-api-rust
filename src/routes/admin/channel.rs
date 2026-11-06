@@ -79,6 +79,12 @@ pub struct IdsInput {
     pub ids: Vec<i64>,
 }
 
+#[derive(Deserialize, Default)]
+pub struct CopyQuery {
+    pub suffix: Option<String>,
+    pub reset_balance: Option<String>,
+}
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/channel", get(list).post(create))
@@ -91,6 +97,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/channel/priority/order", get(priority_order))
         .route("/api/channel/priority/reorder", post(reorder_priority))
         .route("/api/channel/fix", post(fix_abilities))
+        .route("/api/channel/copy/{id}", post(copy_channel))
         .route("/api/channel/batch", post(batch_delete))
         .route("/api/channel/status/batch", post(batch_status))
         .route("/api/channel/{id}", get(get_one).delete(delete_one))
@@ -639,6 +646,54 @@ pub async fn get_key(
         .map_err(internal)?;
     let key = key.ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "channel not found"))?;
     Ok(json_ok(&json!({ "key": key })))
+}
+
+/// 复制渠道：与 Go 一致，重命名加后缀、清零测试时间，可选清零余额与已用额度。
+pub async fn copy_channel(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Query(params): Query<CopyQuery>,
+) -> Result<axum::response::Response, ApiError> {
+    let source = load_channel(&state, id)
+        .await?
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "channel not found"))?;
+    let suffix = params.suffix.unwrap_or_else(|| "_copy".to_string());
+    let reset_balance = match params.reset_balance.as_deref() {
+        Some(raw) => match raw.parse::<bool>() {
+            Ok(value) => value,
+            Err(_) => raw == "1" || raw == "t" || raw == "T" || raw == "TRUE" || raw == "True",
+        },
+        None => true,
+    };
+    // INSERT ... SELECT 逐列搬运，未知列由 Rust 侧的显式列表以外的列不复制，
+    // 已知 JSON 文本列原样透传，不做解析。
+    let result = sqlx::query(
+        "INSERT INTO channels (type, `key`, status, name, weight, created_time, test_time, response_time, base_url, other, balance, balance_updated_time, models, `group`, used_quota, model_mapping, status_code_mapping, priority, auto_ban, other_info, tag, setting, param_override, header_override, remark, channel_info, settings, open_ai_organization, test_model) \
+         SELECT type, `key`, status, ?, weight, ?, 0, 0, base_url, other, ?, balance_updated_time, models, `group`, ?, model_mapping, status_code_mapping, priority, auto_ban, other_info, tag, setting, param_override, header_override, remark, channel_info, settings, open_ai_organization, test_model \
+         FROM channels WHERE id=?",
+    )
+    .bind(format!("{}{}", source.name, suffix))
+    .bind(now())
+    .bind(if reset_balance { Some(0.0) } else { source.balance })
+    .bind(if reset_balance { Some(0) } else { source.used_quota })
+    .bind(id)
+    .execute(&state.pool)
+    .await
+    .map_err(internal)?;
+    let new_id = result.last_insert_rowid();
+    rebuild_abilities(
+        &state,
+        new_id,
+        &source.models,
+        &source.group,
+        source.status,
+        source.priority.unwrap_or(0),
+        source.weight.unwrap_or(0),
+        source.tag.as_deref(),
+    )
+    .await?;
+    state.reload_caches().await.map_err(internal)?;
+    Ok(json_ok(&json!({ "id": new_id })))
 }
 
 pub async fn all_models(
