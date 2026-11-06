@@ -66,7 +66,7 @@
 | --- | --- | --- | --- |
 | SQLite 同库同 schema | 复刻 | 已实现 | M1：WAL 连接 + 必需表/列校验 |
 | `users` / `tokens` / `channels` / `abilities` / `options` 读取 | 复刻 | 已实现 | M1：内存缓存加载，未知列不解析 |
-| `logs` 消费日志写入 | 复刻 | 待实现 | `type=2`，`quota=0`，记录 token/耗时/渠道/Key 索引 |
+| `logs` 消费日志写入 | 复刻 | 已实现 | M2：异步批量写，`type=2`、`quota=0`，同事务更新 `tokens.accessed_time` |
 | `quota_data` 统计 | 待评估 | 待评估 | 看板可直接从 `logs` 聚合，避免双写 |
 | `user_sessions` 会话持久化 | 复刻 | 已实现 | M1：JWT + refresh cookie |
 | 多 Token 管理 | 复刻 | 待实现 | 状态/过期/分组/模型限制/IP 白名单（认证已实现，CRUD 待做） |
@@ -81,9 +81,9 @@
 
 | 端点 | 决策 | 状态 | 备注 |
 | --- | --- | --- | --- |
-| `POST /v1/chat/completions` | 复刻 | 待实现 | 流式/非流式，OpenAI 兼容上游透传 |
-| `POST /v1/messages`（含 `?beta=true`） | 复刻 | 待实现 | Anthropic↔OpenAI Chat 转换 |
-| `POST /v1/responses` | 复刻 | 待实现 | Responses↔Chat 转换（现网无真实流量） |
+| `POST /v1/chat/completions` | 复刻 | 已实现 | M2：流式/非流式透传，增量 usage，断连取消上游 |
+| `POST /v1/messages`（含 `?beta=true`） | 复刻 | 已实现 | M2：Anthropic↔OpenAI Chat 转换（非流式+流式） |
+| `POST /v1/responses` | 复刻 | 已实现 | M2：Responses↔Chat 转换（现网无真实流量） |
 | `POST /v1/messages/count_tokens` | 不复刻 | 不复刻 | 现网一直 404，保持 404 |
 | `GET /v1/models`、`GET /v1/models/:model` | 复刻 | 已实现 | M1：按分组/Token 限制聚合 |
 | `POST /v1/embeddings` | 复刻 | 待实现 | 透传 |
@@ -100,13 +100,13 @@
 
 | 功能 | 决策 | 状态 | 备注 |
 | --- | --- | --- | --- |
-| 分组匹配（default/vip） | 复刻 | 待实现 | Token 分组决定可用渠道 |
-| 优先级 + 权重选择 | 复刻 | 待实现 | 按 `abilities`/`channels` |
-| 多 Key polling | 复刻 | 待实现 | 进程内轮询，不依赖 Redis |
-| 单 Key 禁用/恢复 | 复刻 | 待实现 | 认证失败等场景 |
-| 429/5xx 重试与跨渠道切换 | 复刻 | 待实现 | `RetryTimes=10`，流式开始后不重试 |
-| 模型映射 `model_mapping` | 复刻 | 待实现 | 现网为空，读字段即可 |
-| Header 覆盖/透传 | 复刻 | 待实现 | 现网用 `Authorization: Bearer {api_key}` + 通配透传 |
+| 分组匹配（default/vip） | 复刻 | 已实现 | M2：Token 分组决定可用渠道 |
+| 优先级 + 权重选择 | 复刻 | 已实现 | M2：优先级分层 + 权重无放回抽样 |
+| 多 Key polling | 复刻 | 已实现 | M2：进程内轮询，不依赖 Redis |
+| 单 Key 禁用/恢复 | 复刻 | 已实现 | M2：401/403/429 后 600s 内跳过 |
+| 429/5xx 重试与跨渠道切换 | 复刻 | 已实现 | M2：`RetryTimes` 上限 10，响应开始后不重试 |
+| 模型映射 `model_mapping` | 复刻 | 已实现 | M2：链式映射 + 循环保护 |
+| Header 覆盖/透传 | 复刻 | 已实现 | M2：通配/正则/删除/占位符；Anthropic 用 `x-api-key` |
 | Param 覆盖 | 待实现 | 待实现 | 现网为空 |
 | 上游模型同步 / 余额查询 / Ollama 拉取 / VLLM 状态 | 不复刻 | 不复刻 | 管理页裁掉 |
 | 标签批量操作 / 优先级拖拽排序 | 不复刻 | 不复刻 | 保留基础编辑即可 |
@@ -173,8 +173,8 @@
 
 ## 7. 里程碑
 
-1. M1 基础骨架 + 数据层 + 认证（可读现有库、Token 可认证）
-2. M2 转发核心 + 渠道选择/重试（chat/completions、messages 可用）
+1. M1 基础骨架 + 数据层 + 认证（可读现有库、Token 可认证）— 已完成
+2. M2 转发核心 + 渠道选择/重试（chat/completions、messages、responses 可用，跨协议转换）— 已完成
 3. M3 管理 API + 前端裁剪（可登录并管理 Token/渠道/日志/看板/模型）
 4. M4 全套端点 + 兼容性/并发测试 + 本地数据验收
 5. M5 本地交叉编译、上传切换、回滚演练
