@@ -26,7 +26,7 @@ pub enum Wire {
 }
 
 impl Wire {
-    fn sy(self) -> WireFormat {
+    pub(crate) fn sy(self) -> WireFormat {
         match self {
             Wire::Chat => WireFormat::OpenAiChat,
             Wire::Messages => WireFormat::AnthropicMessages,
@@ -34,7 +34,7 @@ impl Wire {
         }
     }
 
-    fn path(self) -> &'static str {
+    pub(crate) fn path(self) -> &'static str {
         match self {
             Wire::Chat => "/v1/chat/completions",
             Wire::Messages => "/v1/messages",
@@ -43,7 +43,7 @@ impl Wire {
     }
 }
 
-fn upstream_wire(channel_type: i64) -> Wire {
+pub(crate) fn upstream_wire(channel_type: i64) -> Wire {
     if channel_type == 14 {
         Wire::Messages
     } else {
@@ -172,7 +172,7 @@ fn upstream_error_response(client: Wire, status: StatusCode, bytes: &Bytes, ct: 
     relay::openai_error(status, format!("upstream error: {text}"), "upstream_error")
 }
 
-fn upstream_headers(
+pub(crate) fn upstream_headers(
     headers: &HeaderMap,
     key: &str,
     overrides: Option<&str>,

@@ -96,7 +96,20 @@ pub fn router() -> Router<AppState> {
         .route("/api/channel/{id}/key", post(get_key))
 }
 
-fn json_text(value: Option<&Value>) -> Option<String> {
+/// `channels` 表的全部读取列，顺序与 `ChannelRow` 字段一致。
+pub(crate) const SELECT_COLUMNS: &str = "id, type, `key`, status, name, models, `group`, base_url, priority, weight, channel_info, model_mapping, header_override, created_time, test_time, response_time, open_ai_organization, test_model, other, balance, balance_updated_time, used_quota, status_code_mapping, auto_ban, other_info, tag, setting, param_override, remark, settings";
+
+pub(crate) async fn load_channel(state: &AppState, id: i64) -> Result<Option<ChannelRow>, ApiError> {
+    let sql = format!("SELECT {SELECT_COLUMNS} FROM channels WHERE id=?");
+    let row: Option<ChannelRow> = sqlx::query_as(&sql)
+        .bind(id)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(internal)?;
+    Ok(row)
+}
+
+pub(crate) fn json_text(value: Option<&Value>) -> Option<String> {
     match value {
         None | Some(Value::Null) => None,
         Some(Value::String(s)) => Some(s.clone()),
@@ -172,7 +185,7 @@ fn channel_json(channel: &ChannelRow) -> Value {
     })
 }
 
-fn split_list(input: &str) -> Vec<String> {
+pub(crate) fn split_list(input: &str) -> Vec<String> {
     input
         .split(',')
         .map(str::trim)
@@ -317,7 +330,7 @@ async fn list_channels(
     .await
     .map_err(internal)?;
     let rows: Vec<ChannelRow> = sqlx::query_as(&format!(
-        "SELECT id, type, `key`, status, name, models, `group`, base_url, priority, weight, channel_info, model_mapping, header_override, created_time, test_time, response_time, open_ai_organization, test_model, other, balance, balance_updated_time, used_quota, status_code_mapping, auto_ban, other_info, tag, setting, param_override, remark, settings FROM channels WHERE {} {order} LIMIT ? OFFSET ?",
+        "SELECT {SELECT_COLUMNS} FROM channels WHERE {} {order} LIMIT ? OFFSET ?",
         where_sql()
     ))
     .bind(&status)
@@ -361,14 +374,9 @@ pub async fn get_one(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<axum::response::Response, ApiError> {
-    let row: Option<ChannelRow> = sqlx::query_as(
-        "SELECT id, type, `key`, status, name, models, `group`, base_url, priority, weight, channel_info, model_mapping, header_override, created_time, test_time, response_time, open_ai_organization, test_model, other, balance, balance_updated_time, used_quota, status_code_mapping, auto_ban, other_info, tag, setting, param_override, remark, settings FROM channels WHERE id=?",
-    )
-    .bind(id)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(internal)?;
-    let row = row.ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "channel not found"))?;
+    let row = load_channel(&state, id)
+        .await?
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "channel not found"))?;
     Ok(json_ok(&channel_json(&row)))
 }
 
@@ -449,14 +457,9 @@ pub async fn update(
     let id = input
         .id
         .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "id is required"))?;
-    let current: Option<ChannelRow> = sqlx::query_as(
-        "SELECT id, type, `key`, status, name, models, `group`, base_url, priority, weight, channel_info, model_mapping, header_override, created_time, test_time, response_time, open_ai_organization, test_model, other, balance, balance_updated_time, used_quota, status_code_mapping, auto_ban, other_info, tag, setting, param_override, remark, settings FROM channels WHERE id=?",
-    )
-    .bind(id)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(internal)?;
-    let current = current.ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "channel not found"))?;
+    let current = load_channel(&state, id)
+        .await?
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "channel not found"))?;
 
     let key = match input.key.as_deref().map(str::trim) {
         Some(k) if !k.is_empty() => {

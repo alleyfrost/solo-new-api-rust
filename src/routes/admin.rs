@@ -3,6 +3,7 @@ use axum::Router;
 use crate::state::AppState;
 
 pub mod channel;
+pub mod channel_ops;
 pub mod data;
 pub mod log;
 pub mod misc;
@@ -14,6 +15,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .merge(token::router())
         .merge(channel::router())
+        .merge(channel_ops::router())
         .merge(log::router())
         .merge(data::router())
         .merge(models::router())
