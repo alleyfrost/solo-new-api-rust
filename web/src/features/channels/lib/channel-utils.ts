@@ -16,7 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { formatCurrencyFromUSD, formatQuotaWithCurrency } from '@/lib/currency'
 import { formatTimestampToDate } from '@/lib/format'
 
 import {
@@ -322,42 +321,6 @@ export function validateChannelSettings(settings: string): boolean {
 }
 
 // ============================================================================
-// Balance Formatting
-// ============================================================================
-
-/**
- * Format balance with currency symbol
- */
-export function formatBalance(balance: number | null | undefined): string {
-  if (balance == null || Number.isNaN(balance)) {
-    return '-'
-  }
-  return formatCurrencyFromUSD(balance, {
-    digitsLarge: 2,
-    digitsSmall: 4,
-    abbreviate: false,
-  })
-}
-
-/**
- * Get balance status color
- */
-export function getBalanceVariant(
-  balance: number
-): 'success' | 'warning' | 'danger' | 'neutral' {
-  if (balance === 0) {
-    return 'neutral'
-  }
-  if (balance < 1) {
-    return 'danger'
-  }
-  if (balance < 10) {
-    return 'warning'
-  }
-  return 'success'
-}
-
-// ============================================================================
 // Response Time Utilities
 // ============================================================================
 
@@ -484,19 +447,6 @@ export function formatTimestamp(timestamp: number): string {
 }
 
 // ============================================================================
-// Quota Formatting
-// ============================================================================
-
-/** Format quota units using the global currency display configuration. */
-export function formatQuota(quota: number): string {
-  return formatQuotaWithCurrency(quota, {
-    digitsLarge: 2,
-    digitsSmall: 4,
-    abbreviate: true,
-  })
-}
-
-// ============================================================================
 // Priority & Weight Utilities
 // ============================================================================
 
@@ -552,54 +502,6 @@ export function validateModels(models: string): boolean {
  */
 export function validateGroups(groups: string): boolean {
   return parseGroupsList(groups).length > 0
-}
-
-/**
- * Check if channel needs attention (low balance, auto-disabled, etc.)
- */
-export function channelNeedsAttention(channel: Channel): boolean {
-  // Auto-disabled
-  if (channel.status === 3) {
-    return true
-  }
-
-  // Low balance (less than $1)
-  if (channel.balance > 0 && channel.balance < 1) {
-    return true
-  }
-
-  // Multi-key channel with all keys disabled
-  if (
-    channel.channel_info?.is_multi_key &&
-    channel.channel_info.multi_key_status_list &&
-    Object.keys(channel.channel_info.multi_key_status_list).length >=
-      channel.channel_info.multi_key_size
-  ) {
-    return true
-  }
-
-  return false
-}
-
-/**
- * Get attention reason for channel
- */
-export function getAttentionReason(channel: Channel): string | null {
-  if (channel.status === 3) {
-    return 'Auto-disabled'
-  }
-  if (channel.balance > 0 && channel.balance < 1) {
-    return 'Low balance'
-  }
-  if (
-    channel.channel_info?.is_multi_key &&
-    channel.channel_info.multi_key_status_list &&
-    Object.keys(channel.channel_info.multi_key_status_list).length >=
-      channel.channel_info.multi_key_size
-  ) {
-    return 'All keys disabled'
-  }
-  return null
 }
 
 // ============================================================================
@@ -675,9 +577,6 @@ export function aggregateChannelsByTag(
     // Add to children
     tagRow.children.push(channel)
     const childCount = tagRow.children.length
-
-    // Aggregate used_quota (sum)
-    tagRow.used_quota += channel.used_quota
 
     // Aggregate response_time (average)
     tagRow.response_time =

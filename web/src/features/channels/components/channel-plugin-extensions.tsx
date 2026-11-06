@@ -16,11 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { ChevronRight } from 'lucide-react'
+import { ChevronRight, Puzzle } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
-import { PluginIcon } from '@/features/task-plugins/components/plugin-icon'
 import { resolveLocalizedText } from '@/lib/localized-text'
 
 import type { TaskPluginOption } from '../api'
@@ -70,7 +69,7 @@ export function ChannelPluginExtensions(props: {
             onClick={() => props.onConfigure(plugin.key)}
           >
             <span aria-hidden='true' className='shrink-0'>
-              <PluginIcon plugin={plugin} size={16} />
+              <Puzzle size={16} />
             </span>
             <span className='max-w-36 truncate'>{plugin.name}</span>
             <span className='text-muted-foreground shrink-0 text-xs tabular-nums'>

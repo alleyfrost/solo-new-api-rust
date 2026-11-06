@@ -207,14 +207,6 @@ export interface ChannelTestResponse {
   }
 }
 
-export interface ChannelBalanceResponse {
-  success: boolean
-  message?: string
-  balance?: number
-  currency?: string
-  raw_response?: string
-}
-
 export interface FetchModelsResponse {
   success: boolean
   message?: string
@@ -275,7 +267,6 @@ export type ChannelSortBy =
   | 'id'
   | 'name'
   | 'priority'
-  | 'balance'
   | 'response_time'
   | 'test_time'
 
@@ -334,21 +325,6 @@ export interface MultiKeyManageParams {
 
 export interface BatchDeleteParams {
   ids: number[]
-}
-
-export interface BatchSetTagParams {
-  ids: number[]
-  tag: string | null
-}
-
-export interface TagOperationParams {
-  tag: string
-  new_tag?: string
-  priority?: number
-  weight?: number
-  model_mapping?: string
-  models?: string
-  groups?: string
 }
 
 // ============================================================================

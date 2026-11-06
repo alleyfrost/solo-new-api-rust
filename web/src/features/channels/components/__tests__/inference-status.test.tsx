@@ -44,7 +44,7 @@ import { CHANNEL_TYPE_VLLM, CHANNEL_TYPE_SGLANG } from '../../constants'
 import type { InferenceStatus } from '../../lib/inference-status'
 import { channelSchema } from '../../types'
 import { ChannelRowActionsLayoutContext } from '../channel-row-actions-context'
-import { BalanceCell } from '../channels-columns'
+import { ChannelAccountCell } from '../channels-columns'
 import { ChannelsDialogs } from '../channels-dialogs'
 import { ChannelsProvider } from '../channels-provider'
 import { InferenceStatusDialog } from '../dialogs/inference-status-dialog'
@@ -167,7 +167,7 @@ it.each([
       <QueryClientProvider client={client}>
         <ChannelsProvider>
           <ChannelRowActionsLayoutContext.Provider value={layout}>
-            <BalanceCell channel={channel} />
+            <ChannelAccountCell channel={channel} />
           </ChannelRowActionsLayoutContext.Provider>
           <ChannelsDialogs />
         </ChannelsProvider>

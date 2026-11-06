@@ -27,6 +27,7 @@ import {
   ChevronDown,
   ClipboardPaste,
   Loader2,
+  Puzzle,
   Server,
   Sparkles,
   Trash2,
@@ -104,7 +105,6 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
-import { PluginIcon } from '@/features/task-plugins/components/plugin-icon'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { useHiddenClickUnlock } from '@/hooks/use-hidden-click-unlock'
 import {
@@ -1339,7 +1339,7 @@ export function ChannelMutateDrawer({
           value: plugin.key,
           label: plugin.name,
           hint: plugin.key,
-          icon: <PluginIcon plugin={plugin} size={16} />,
+          icon: <Puzzle size={16} className='text-muted-foreground' />,
         })),
     [taskPluginOptionsQuery.data]
   )
@@ -4885,11 +4885,7 @@ export function ChannelMutateDrawer({
                           </span>
                         </>
                       ) : (
-                        <ChannelTypeLogo
-                          type={currentType}
-                          plugin={boundTaskPlugin}
-                          size={18}
-                        />
+                        <ChannelTypeLogo type={currentType} size={18} />
                       )}
                       <span className='min-w-0 truncate'>{providerLabel}</span>
                       {!showProviderPicker && (

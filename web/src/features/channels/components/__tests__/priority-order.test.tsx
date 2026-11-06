@@ -729,7 +729,7 @@ test('the compact more-actions button opens by keyboard and restores focus on Es
   await user.keyboard('{Enter}')
   expect(more).toHaveAttribute('aria-expanded', 'true')
   expect(
-    await screen.findByRole('menuitem', { name: 'Test All Channels' })
+    await screen.findByRole('menuitem', { name: 'Repair Channel Consistency' })
   ).toBeVisible()
   await user.keyboard('{Escape}')
   await waitFor(() => expect(more).toHaveFocus())

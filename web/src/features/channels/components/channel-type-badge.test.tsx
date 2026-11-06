@@ -67,7 +67,6 @@ test('identifies a bound plugin by its metadata and retains the task-plugin type
   ])
   render(<ChannelTypeHarness pluginKey='incho' />)
   expect(await screen.findByText('Incho AI')).toBeInTheDocument()
-  expect(screen.getByText('IA')).toBeInTheDocument()
   expect(screen.getByText('Task Plugin')).toBeInTheDocument()
   expect(screen.queryByTestId('OpenAI.Color')).not.toBeInTheDocument()
 })

@@ -24,7 +24,6 @@ import {
   Pencil,
   PlugZap,
   Gauge,
-  DollarSign,
   Download,
   Copy,
   Power,
@@ -115,11 +114,6 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
     } finally {
       setIsTesting(false)
     }
-  }
-
-  const handleQueryBalance = () => {
-    setCurrentRow(channel)
-    setOpen('balance-query')
   }
 
   const handleFetchModels = () => {
@@ -277,14 +271,6 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
             {t('Test Connection')}
             <DropdownMenuShortcut>
               <PlugZap size={16} />
-            </DropdownMenuShortcut>
-          </DropdownMenuItem>
-
-          {/* Query Balance */}
-          <DropdownMenuItem onClick={handleQueryBalance}>
-            {t('Query Balance')}
-            <DropdownMenuShortcut>
-              <DollarSign size={16} />
             </DropdownMenuShortcut>
           </DropdownMenuItem>
 

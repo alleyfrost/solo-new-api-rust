@@ -20,11 +20,15 @@ import { type ReactNode, useId } from 'react'
 import { type UseFormReturn, useFormContext, useWatch } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 
-import { FieldGroup } from '@/components/ui/field'
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from '@/components/ui/field'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
-import { SettingsSwitchField } from '@/features/system-settings/components/settings-form-layout'
-import { ChannelHealthSource } from '@/features/system-settings/request-policies/related-policy-link'
 import { cn } from '@/lib/utils'
 
 import { CHANNEL_TYPE_TASK_PLUGIN, MODEL_FETCHABLE_TYPES } from '../constants'
@@ -143,7 +147,7 @@ export function ChannelQuickOptions(props: ChannelQuickOptionsProps) {
   options.push({
     key: 'auto-ban',
     label: t('Auto-disable channel'),
-    description: <ChannelHealthSource autoBan={(autoBan ?? 1) === 1} />,
+    description: t('Automatically disable channel on repeated failures'),
     checked: (autoBan ?? 1) === 1,
     onCheckedChange: (value) =>
       form.setValue('auto_ban', value ? 1 : 0, {
@@ -223,17 +227,26 @@ export function ChannelQuickOptions(props: ChannelQuickOptionsProps) {
       <h3 id={`${id}-title`} className='mb-1 text-sm font-semibold'>
         {t('Quick options')}
       </h3>
-      <FieldGroup className='grid gap-x-6 gap-y-0 @sm:grid-cols-2'>
+      <FieldGroup className='grid gap-x-6 gap-y-2 @sm:grid-cols-2'>
         {options.map((option) => (
-          <SettingsSwitchField
+          <Field
             key={option.key}
-            controlId={`${id}-${option.key}`}
-            checked={option.checked}
-            onCheckedChange={option.onCheckedChange}
-            label={option.label}
-            description={option.description}
-            disabled={option.disabled}
-          />
+            orientation='horizontal'
+            className='items-center justify-between gap-4'
+          >
+            <FieldContent>
+              <FieldLabel htmlFor={`${id}-${option.key}`}>
+                {option.label}
+              </FieldLabel>
+              <FieldDescription>{option.description}</FieldDescription>
+            </FieldContent>
+            <Switch
+              id={`${id}-${option.key}`}
+              checked={option.checked}
+              onCheckedChange={option.onCheckedChange}
+              disabled={option.disabled}
+            />
+          </Field>
         ))}
       </FieldGroup>
     </section>

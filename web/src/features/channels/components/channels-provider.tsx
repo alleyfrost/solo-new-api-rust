@@ -40,13 +40,10 @@ type DialogType =
   | 'create-channel'
   | 'update-channel'
   | 'test-channel'
-  | 'balance-query'
   | 'fetch-models'
   | 'ollama-models'
   | 'inference-status'
   | 'multi-key-manage'
-  | 'tag-batch-edit'
-  | 'edit-tag'
   | 'copy-channel'
   | null
 
@@ -57,8 +54,6 @@ type ChannelsContextType = {
   setOpen: (open: DialogType) => void
   currentRow: Channel | null
   setCurrentRow: (row: Channel | null) => void
-  currentTag: string | null
-  setCurrentTag: (tag: string | null) => void
   enableTagMode: boolean
   setEnableTagMode: (enabled: boolean) => void
   sorting: SortingState
@@ -87,7 +82,6 @@ const ChannelsContext = createContext<ChannelsContextType | undefined>(
 export function ChannelsProvider({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState<DialogType>(null)
   const [currentRow, setCurrentRow] = useState<Channel | null>(null)
-  const [currentTag, setCurrentTag] = useState<string | null>(null)
   const [enableTagMode, setEnableTagMode] = useState(() => {
     return localStorage.getItem('enable-tag-mode') === 'true'
   })
@@ -123,8 +117,6 @@ export function ChannelsProvider({ children }: { children: React.ReactNode }) {
       setOpen,
       currentRow,
       setCurrentRow,
-      currentTag,
-      setCurrentTag,
       enableTagMode,
       setEnableTagMode,
       sorting,
@@ -140,7 +132,6 @@ export function ChannelsProvider({ children }: { children: React.ReactNode }) {
     [
       open,
       currentRow,
-      currentTag,
       enableTagMode,
       sorting,
       batchMode,

@@ -35,7 +35,6 @@ import {
 } from '@/components/ui/command'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { AutoGroupFlowBorder } from '@/features/keys/components/auto-group-visuals'
-import { PluginIcon } from '@/features/task-plugins/components/plugin-icon'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { resolveLocalizedText } from '@/lib/localized-text'
 
@@ -298,18 +297,14 @@ export function ChannelProviderPicker(props: ChannelProviderPickerProps) {
                     )}
                   <span className='flex min-w-0 items-start gap-2.5'>
                     <span className='shrink-0'>
-                      {option.plugin ? (
-                        <PluginIcon plugin={option.plugin} size={20} />
-                      ) : (
-                        <ChannelTypeLogo
-                          type={
-                            option.target.kind === 'builtin'
-                              ? option.target.type
-                              : CHANNEL_TYPE_TASK_PLUGIN
-                          }
-                          size={20}
-                        />
-                      )}
+                      <ChannelTypeLogo
+                        type={
+                          option.target.kind === 'builtin'
+                            ? option.target.type
+                            : CHANNEL_TYPE_TASK_PLUGIN
+                        }
+                        size={20}
+                      />
                     </span>
                     <span className='min-w-0 flex-1'>
                       <span className='flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1'>

@@ -16,13 +16,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { Puzzle } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Dialog } from '@/components/dialog'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { PluginIcon } from '@/features/task-plugins/components/plugin-icon'
 
 import type { TaskPluginOption } from '../../api'
 import { UpstreamModelSelection } from '../upstream-model-selection'
@@ -141,7 +141,7 @@ export function ConfigureModelsDialog(props: ConfigureModelsDialogProps) {
                   title={item.name}
                 >
                   <span aria-hidden='true'>
-                    <PluginIcon plugin={item} size={16} />
+                    <Puzzle size={16} />
                   </span>
                   <span className='max-w-40 truncate'>{item.name}</span>
                 </TabsTrigger>

@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { getGroups as getUserGroups } from '@/features/users/api'
+import { getGroups as getUserGroups } from '@/lib/api'
 import { api, type ApiRequestConfig } from '@/lib/api'
 import { requireServerSuccess } from '@/lib/server-error-message'
 
@@ -25,9 +25,7 @@ import type { InferenceStatus } from './lib/inference-status'
 import type {
   AddChannelRequest,
   BatchDeleteParams,
-  BatchSetTagParams,
   Channel,
-  ChannelBalanceResponse,
   ChannelOpsResponse,
   ChannelTestResponse,
   CopyChannelParams,
@@ -40,7 +38,6 @@ import type {
   MultiKeyStatusResponse,
   SearchChannelsParams,
   SearchChannelsResponse,
-  TagOperationParams,
 } from './types'
 
 const channelActionConfig = (
@@ -261,20 +258,6 @@ export async function batchDeleteChannels(
   return res.data
 }
 
-/**
- * Batch set tag for channels
- */
-export async function batchSetChannelTag(
-  data: BatchSetTagParams
-): Promise<{ success: boolean; message?: string; data?: number }> {
-  const res = await api.post(
-    '/api/channel/batch/tag',
-    data,
-    channelActionConfig()
-  )
-  return res.data
-}
-
 // ============================================================================
 // Channel Operations
 // ============================================================================
@@ -289,19 +272,6 @@ export async function testChannel(
   const res = await api.get(
     `/api/channel/test/${id}`,
     channelActionConfig({ params })
-  )
-  return res.data
-}
-
-/**
- * Update channel balance
- */
-export async function updateChannelBalance(
-  id: number
-): Promise<ChannelBalanceResponse> {
-  const res = await api.get(
-    `/api/channel/update_balance/${id}`,
-    channelActionConfig()
   )
   return res.data
 }
@@ -347,18 +317,6 @@ export async function fixChannelAbilities(): Promise<{
     undefined,
     channelActionConfig()
   )
-  return res.data
-}
-
-/**
- * Delete all disabled channels
- */
-export async function deleteDisabledChannels(): Promise<{
-  success: boolean
-  message?: string
-  data?: number
-}> {
-  const res = await api.delete('/api/channel/disabled', channelActionConfig())
   return res.data
 }
 
@@ -542,58 +500,6 @@ export async function deleteDisabledMultiKeys(
 }
 
 // ============================================================================
-// Tag Operations
-// ============================================================================
-
-/**
- * Enable all channels with a specific tag
- */
-export async function enableTagChannels(
-  tag: string
-): Promise<{ success: boolean; message?: string }> {
-  const res = await api.post(
-    '/api/channel/tag/enabled',
-    { tag },
-    channelActionConfig()
-  )
-  return res.data
-}
-
-/**
- * Disable all channels with a specific tag
- */
-export async function disableTagChannels(
-  tag: string
-): Promise<{ success: boolean; message?: string }> {
-  const res = await api.post(
-    '/api/channel/tag/disabled',
-    { tag },
-    channelActionConfig()
-  )
-  return res.data
-}
-
-/**
- * Edit all channels with a specific tag
- */
-export async function editTagChannels(
-  params: TagOperationParams
-): Promise<{ success: boolean; message?: string }> {
-  const res = await api.put('/api/channel/tag', params, channelActionConfig())
-  return res.data
-}
-
-/**
- * Get models for a specific tag
- */
-export async function getTagModels(
-  tag: string
-): Promise<{ success: boolean; message?: string; data?: string }> {
-  const res = await api.get('/api/channel/tag/models', { params: { tag } })
-  return res.data
-}
-
-// ============================================================================
 // Utility Functions
 // ============================================================================
 
@@ -632,31 +538,6 @@ export async function deleteOllamaModel(params: {
 }
 
 /**
- * Test all enabled channels
- */
-export async function testAllChannels(): Promise<{
-  success: boolean
-  message?: string
-}> {
-  const res = await api.get('/api/channel/test', channelActionConfig())
-  return res.data
-}
-
-/**
- * Update balance for all enabled channels
- */
-export async function updateAllChannelsBalance(): Promise<{
-  success: boolean
-  message?: string
-}> {
-  const res = await api.get(
-    '/api/channel/update_balance',
-    channelActionConfig()
-  )
-  return res.data
-}
-
-/**
  * Get all available models
  */
 export async function getAllModels(): Promise<{
@@ -677,20 +558,6 @@ export async function getEnabledModels(): Promise<{
   data?: string[]
 }> {
   const res = await api.get('/api/channel/models_enabled')
-  return res.data
-}
-
-// ============================================================================
-// Ollama Utilities
-// ============================================================================
-
-/**
- * Check Ollama version for a given channel
- */
-export async function getOllamaVersion(
-  channelId: number
-): Promise<{ success: boolean; message?: string; data?: { version: string } }> {
-  const res = await api.get(`/api/channel/ollama/version/${channelId}`)
   return res.data
 }
 

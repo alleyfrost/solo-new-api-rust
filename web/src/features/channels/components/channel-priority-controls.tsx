@@ -95,7 +95,6 @@ export function ChannelSortControl(props: {
     { value: 'priority', label: t('Priority') },
     { value: 'id', label: t('ID') },
     { value: 'name', label: t('Name') },
-    { value: 'balance', label: t('Balance') },
     { value: 'response_time', label: t('Response') },
     { value: 'test_time', label: t('Last Tested') },
   ]

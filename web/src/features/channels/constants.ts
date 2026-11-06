@@ -380,10 +380,8 @@ export const SUCCESS_MESSAGES = {
   ENABLED: 'Channel enabled successfully',
   DISABLED: 'Channel disabled successfully',
   TESTED: 'Channel test completed',
-  BALANCE_QUERIED: 'Balance queried successfully',
   MODELS_FETCHED: 'Models fetched successfully',
   COPIED: 'Channel copied successfully',
-  TAG_SET: 'Tag set successfully',
   BATCH_DELETED: 'Channels deleted successfully',
 } as const
 

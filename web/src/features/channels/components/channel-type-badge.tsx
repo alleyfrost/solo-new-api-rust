@@ -22,8 +22,6 @@ import { useTranslation } from 'react-i18next'
 
 import { ProviderBadge } from '@/components/provider-badge'
 import { StatusBadge } from '@/components/status-badge'
-import { PluginIcon } from '@/features/task-plugins/components/plugin-icon'
-import type { PluginIconInput } from '@/features/task-plugins/lib/plugin-icon'
 import {
   ADMIN_PERMISSION_ACTIONS,
   ADMIN_PERMISSION_RESOURCES,
@@ -40,14 +38,10 @@ import { getChannelTypeIcon } from '../lib/channel-utils'
 
 export function ChannelTypeLogo(props: {
   type: number
-  plugin?: PluginIconInput
   size?: number
   className?: string
 }) {
   const size = props.size ?? 16
-  if (props.type === CHANNEL_TYPE_TASK_PLUGIN && props.plugin) {
-    return <PluginIcon plugin={props.plugin} size={size} />
-  }
   const isKnownType = CHANNEL_TYPE_OPTIONS.some(
     (option) => option.value === props.type
   )
@@ -84,8 +78,6 @@ export function TaskPluginChannelBadge(props: { pluginKey?: string }) {
   })
   const plugin = query.data?.find((item) => item.key === props.pluginKey)
   const label = plugin?.name || props.pluginKey || t('Task Plugin')
-  const iconInput =
-    plugin ?? (props.pluginKey ? { key: props.pluginKey } : undefined)
 
   return (
     <div
@@ -98,11 +90,7 @@ export function TaskPluginChannelBadge(props: { pluginKey?: string }) {
     >
       <ProviderBadge
         iconNode={
-          <ChannelTypeLogo
-            type={CHANNEL_TYPE_TASK_PLUGIN}
-            plugin={iconInput}
-            size={18}
-          />
+          <ChannelTypeLogo type={CHANNEL_TYPE_TASK_PLUGIN} size={18} />
         }
         label={label}
         colorText={false}

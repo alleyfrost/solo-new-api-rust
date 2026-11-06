@@ -22,10 +22,7 @@ import {
   Plus,
   MoreHorizontal,
   Settings2,
-  Trash2,
   Tags,
-  TestTube,
-  DollarSign,
   ListChecks,
   RefreshCw,
   ArrowUpFromLine,
@@ -59,12 +56,7 @@ import {
 } from '@/lib/admin-permissions'
 import { useAuthStore } from '@/stores/auth-store'
 
-import {
-  handleDeleteAllDisabled,
-  handleFixAbilities,
-  handleTestAllChannels,
-  handleUpdateAllBalances,
-} from '../lib'
+import { handleFixAbilities } from '../lib'
 import type { ChannelSortBy } from '../types'
 import { ChannelSortControl } from './channel-priority-controls'
 import { useChannels } from './channels-provider'
@@ -87,7 +79,6 @@ export function ChannelsPrimaryButtons() {
     upstream,
   } = useChannels()
   const queryClient = useQueryClient()
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [showConsistencyDialog, setShowConsistencyDialog] = useState(false)
   const [isRepairingConsistency, setIsRepairingConsistency] = useState(false)
   const currentUser = useAuthStore((s) => s.auth.user)
@@ -211,30 +202,6 @@ export function ChannelsPrimaryButtons() {
             <DropdownMenuSeparator className='sm:hidden' />
 
             <DropdownMenuItem
-              onClick={() => {
-                handleTestAllChannels(queryClient)
-              }}
-            >
-              {t('Test All Channels')}
-              <DropdownMenuShortcut>
-                <TestTube className='h-4 w-4' />
-              </DropdownMenuShortcut>
-            </DropdownMenuItem>
-
-            <DropdownMenuItem
-              onClick={() => {
-                handleUpdateAllBalances(queryClient)
-              }}
-            >
-              {t('Update All Balances')}
-              <DropdownMenuShortcut>
-                <DollarSign className='h-4 w-4' />
-              </DropdownMenuShortcut>
-            </DropdownMenuItem>
-
-            <DropdownMenuSeparator />
-
-            <DropdownMenuItem
               onClick={() => upstream.detectAllUpdates()}
               disabled={upstream.detectAllLoading}
             >
@@ -267,44 +234,9 @@ export function ChannelsPrimaryButtons() {
                 <Settings2 className='h-4 w-4' />
               </DropdownMenuShortcut>
             </DropdownMenuItem>
-
-            <DropdownMenuSeparator />
-
-            <DropdownMenuItem
-              onSelect={(e) => {
-                e.preventDefault()
-                if (!canEditSensitive) return
-                setShowDeleteDialog(true)
-              }}
-              disabled={!canEditSensitive}
-              className='text-destructive focus:text-destructive'
-            >
-              {t('Delete All Disabled')}
-              <DropdownMenuShortcut>
-                <Trash2 className='h-4 w-4' />
-              </DropdownMenuShortcut>
-            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-
-      <ConfirmDialog
-        open={showDeleteDialog}
-        onOpenChange={setShowDeleteDialog}
-        title={t('Delete All Disabled Channels?')}
-        desc={t(
-          'This will permanently delete all manually and automatically disabled channels. This action cannot be undone.'
-        )}
-        destructive
-        handleConfirm={() => {
-          if (!canEditSensitive) return
-          handleDeleteAllDisabled(queryClient, (_count) => {
-            // eslint-disable-next-line no-console
-            console.log(`Deleted ${_count} channels`)
-          })
-          setShowDeleteDialog(false)
-        }}
-      />
 
       <ConfirmDialog
         open={showConsistencyDialog}
