@@ -17,3 +17,7 @@ node_modules/
 
 # misc
 .DS_Store
+
+# deploy staging
+/deploy/context/
+/deploy/*.tar.gz

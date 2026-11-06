@@ -135,11 +135,31 @@
 | --- | --- | --- | --- |
 | `/api/status` 健康检查 | 复刻 | 已实现 | M1：兼容现有 Docker healthcheck |
 | 优雅停机 | 复刻 | 已实现 | M1：SIGINT/SIGTERM |
-| 本地交叉编译 + 上传 | 复刻 | 待实现 | linux/amd64，参考现有 rust:bookworm 配方 |
-| Docker 服务替换 | 复刻 | 待实现 | 保留 `./data:/data`、端口 20128→3000 |
-| 回滚到 Go 版本 | 复刻 | 待实现 | 数据只增量写，保留旧镜像 |
+| 本地交叉编译 + 上传 | 复刻 | 已实现 | `deploy/build.sh`：`rust:1.96-bookworm` + `--platform linux/amd64` + `RUSTUP_TOOLCHAIN=1.96.1`（避免现网拉取 1.96.0 toolchain 卡住）；`deploy/package.sh` 产出 `docker save` 归档 |
+| Docker 服务替换 | 复刻 | 已演练，待确认后上线 | `deploy/Dockerfile` 保留 `./data:/data`、端口 20128→3000、`mem_limit 450m`、`wget` 健康检查；2026-11-06 现网切换 34 分钟后按用户要求回退，后续验证只在本地 Docker 进行 |
+| 回滚到 Go 版本 | 复刻 | 已演练 | 恢复 `docker-compose.yml.bak.rust-20261106` + `docker compose up -d`；旧镜像 `calciumion/new-api:v1.0.0-rc.47` 与 `data/one-api.db.pre-rust-20261106` 保留。回退后核验：`PRAGMA integrity_check` ok，39 张表的列与索引与切换前零差异，Rust 期间增量写入的 23 条消费日志（`quota=0`、`request_id=req_*`、`other={}`）Go 侧读取与列表正常，`channels/tokens/abilities/users/options` 行数与最大 id 未变，无测试残留行 |
 | Prometheus/复杂可观测性 | 不复刻 | 不复刻 | 结构化 tracing 日志即可 |
 | 多节点/集群 | 不复刻 | 不复刻 | 单实例 |
+
+### 4.6 本地 Docker 验收（上线前置门）
+
+`bash deploy/run-local.sh` 用线上快照播种 `/tmp/solo-deploy-data/one-api.db`，以 `--memory 450m`、端口 3006 跑 `solo-new-api-rust:local`；渠道 3/4 的 `base_url` 改成 `http://host.docker.internal:3007` 指向本地 mock 上游，全程不访问真实上游。
+
+| 验收项 | 结果 | 读数 |
+| --- | --- | --- |
+| 启动读现有库 + `/api/status` + SPA/未知路径 | 通过 | healthcheck `grep` 命中；`/api/nope`、`/v1/nope`、`/mj/submit` 均 `404 application/json`；`/token` 返回 index |
+| 线上 argon2id 口令登录 | 通过 | `/api/user/login` 发 access_token + session，`/api/user/self` 200 |
+| Token 认证 | 通过 | 快照里的 48 位 key 加 `sk-` 前缀直接可用；错误 key `401 Invalid token` |
+| 非流式转发 + 日志 | 通过 | `prompt=11 completion=7 quota=0`，`other={}`，`request_id=req_*` |
+| Chat 流式零缓冲 | 通过 | 2.69 MB / 4001 事件全量透传；容器内存 18.4 → 峰值 23.6 → 回落 18.6 MiB |
+| Anthropic 流式转换 | 通过 | `/v1/messages` 输出 `message_start`…`message_stop`，2.46 MB |
+| 跨协议非流式 | 通过 | `/v1/messages`、`/v1/responses` 对 OpenAI 渠道互相转换并给出 usage |
+| 客户端断连取消 | 通过 | curl 2s 断开后 mock 在 +0.09s 记录 `stream-aborted BrokenPipeError`，无 detached 续读 |
+| 24 路并发流式 | 通过 | 24/24 完成、9.69 MB 中转；基线 30.4 → 峰值 47.0 → 结束 33.0 MiB；24 条日志 usage 正确 |
+| 请求体硬上限 | 通过 | 70 MB 请求返回 `413`；默认上限由 64 MiB 收紧为 32 MiB（`MAX_REQUEST_BYTES`） |
+| 管理 API | 通过 | token/channel/models/group/log/stat/data 全部 `success:true` |
+
+- 注意：容器运行期间不要用宿主机 `sqlite3`/`python` 改 `/tmp/solo-deploy-data/one-api.db`。宿主与 VM 共用同一 WAL `-shm` 映射会触发 `SQLITE_IOERR_WRITE (522)`，日志写失败是测试手法造成的假故障；改库要先 `docker stop`，查日志改用 `/api/log`。
 
 ## 5. 线上现状（用于验收）
 
@@ -175,9 +195,9 @@
 
 1. M1 基础骨架 + 数据层 + 认证（可读现有库、Token 可认证）— 已完成
 2. M2 转发核心 + 渠道选择/重试（chat/completions、messages、responses 可用，跨协议转换）— 已完成
-3. M3 管理 API + 前端裁剪（可登录并管理 Token/渠道/日志/看板/模型）
-4. M4 全套端点 + 兼容性/并发测试 + 本地数据验收
-5. M5 本地交叉编译、上传切换、回滚演练
+3. M3 管理 API + 前端裁剪（可登录并管理 Token/渠道/日志/看板/模型）— 已完成
+4. M4 全套端点 + 兼容性/并发测试 + 本地数据验收 — 已完成
+5. M5 本地交叉编译、上传切换、回滚演练 — 编译/镜像/回滚演练完成；现网切换已按要求回退到 Go 版本，验收改在本地 Docker 进行，上线需用户明确确认
 
 ## 8. 相关任务
 
