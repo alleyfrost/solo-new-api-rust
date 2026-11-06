@@ -117,6 +117,50 @@ async fn real_db_schema_caches_and_token_models() {
         assert_eq!(v["success"], true, "{uri}: {v}");
     }
 
+    // 个人资料与会话管理只读走一遍真实 Go schema。
+    let self_routes = axum::Router::new()
+        .route(
+            "/api/user/self",
+            axum::routing::get(solo_new_api_rust::routes::user::self_info),
+        )
+        .route(
+            "/api/user/sessions",
+            axum::routing::get(solo_new_api_rust::routes::user::list_sessions),
+        )
+        .route_layer(axum::middleware::from_fn(fake_admin))
+        .with_state(state.clone());
+    for uri in ["/api/user/self", "/api/user/sessions"] {
+        let res = self_routes
+            .clone()
+            .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let status = res.status();
+        let body = res.into_body().collect().await.unwrap().to_bytes();
+        let text = String::from_utf8_lossy(&body).to_string();
+        assert_eq!(status, 200, "{uri}: {text}");
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["success"], true, "{uri}: {v}");
+    }
+    let res = self_routes
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/user/self")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    let profile: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let setting = profile["data"]["setting"].as_str().unwrap_or_default();
+    assert!(
+        setting.is_empty() || serde_json::from_str::<serde_json::Value>(setting).is_ok(),
+        "users.setting must stay valid JSON: {setting}"
+    );
+    assert!(profile["data"]["has_password"].is_boolean());
+
     let writer = solo_new_api_rust::logging::spawn_writer(pool.clone(), rx);
     let entry = solo_new_api_rust::logging::LogEntry {
         created_at: 1_800_000_000,

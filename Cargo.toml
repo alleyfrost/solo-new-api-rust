@@ -12,6 +12,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio", "macros"] }
 argon2 = "0.5"
+base64 = "0.22"
 jsonwebtoken = "9"
 uuid = { version = "1", features = ["v4"] }
 sha2 = "0.10"

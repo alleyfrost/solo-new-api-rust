@@ -27,7 +27,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/user/auth/refresh", axum::routing::post(routes::user::refresh))
         .route("/api/user/auth/logout", axum::routing::post(routes::user::logout));
     let self_route = axum::Router::new()
-        .route("/api/user/self", axum::routing::get(routes::user::self_info))
+        .route(
+            "/api/user/self",
+            axum::routing::get(routes::user::self_info).put(routes::user::update_self),
+        )
+        .route(
+            "/api/user/setting",
+            axum::routing::put(routes::user::update_setting),
+        )
+        .route(
+            "/api/user/sessions",
+            axum::routing::get(routes::user::list_sessions),
+        )
+        .route(
+            "/api/user/sessions/revoke-others",
+            axum::routing::post(routes::user::revoke_other_sessions),
+        )
+        .route(
+            "/api/user/sessions/{sid}",
+            axum::routing::delete(routes::user::revoke_session),
+        )
         .route(
             "/api/user/self/groups",
             axum::routing::get(routes::user::self_groups),

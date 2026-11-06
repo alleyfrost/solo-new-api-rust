@@ -8,7 +8,7 @@ use tower::ServiceExt;
 #[tokio::test]
 async fn login_then_self() {
     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-    sqlx::query("CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT, password TEXT, display_name TEXT, role INTEGER, status INTEGER, `group` TEXT, auth_version INTEGER, email TEXT, deleted_at TEXT)").execute(&pool).await.unwrap();
+    sqlx::query("CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT, password TEXT, display_name TEXT, role INTEGER, status INTEGER, `group` TEXT, auth_version INTEGER, email TEXT, setting TEXT, created_at INTEGER, deleted_at TEXT)").execute(&pool).await.unwrap();
     sqlx::query("CREATE TABLE user_sessions (sid TEXT PRIMARY KEY, user_id INTEGER, version INTEGER, user_auth_version INTEGER, status TEXT, refresh_hash TEXT, login_method TEXT, ip TEXT, user_agent TEXT, created_at INTEGER, last_active_at INTEGER, expires_at INTEGER, revoked_at INTEGER DEFAULT 0)").execute(&pool).await.unwrap();
     use argon2::password_hash::{rand_core::OsRng, PasswordHasher, SaltString};
     let salt = SaltString::generate(&mut OsRng);

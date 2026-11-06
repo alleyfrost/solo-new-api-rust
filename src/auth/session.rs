@@ -79,6 +79,44 @@ pub fn verify_password(hash: &str, password: &str) -> bool {
         .is_some()
 }
 
+pub const PASSWORD_MIN_CHARS: usize = 8;
+pub const PASSWORD_MAX_CHARS: usize = 128;
+
+/// 与 Go 侧 common.ValidateNewAccountPassword 一致：只按 rune 计数，不做任何规范化。
+pub fn validate_new_password(password: &str) -> Result<(), ApiError> {
+    let chars = password.chars().count();
+    if !(PASSWORD_MIN_CHARS..=PASSWORD_MAX_CHARS).contains(&chars) {
+        return Err(ApiError::new(
+            axum::http::StatusCode::OK,
+            "Password must be between 8 and 128 characters",
+        ));
+    }
+    Ok(())
+}
+
+/// 写出 Go 能校验的 argon2id 串：参数、salt/key 长度与无填充 base64 都被固定，
+/// 因为回滚到 Go 后它只接受 `$argon2id$v=19$m=19456,t=2,p=1$<16B>$<32B>` 这一种格式。
+pub fn hash_password(password: &str) -> Result<String, ApiError> {
+    use base64::Engine;
+    use rand::RngCore;
+    let params = argon2::Params::new(19456, 2, 1, Some(32))
+        .map_err(|e| ApiError::new(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    // V0x13 即 PHC 串里的 v=19，Go 侧 argon2.IDKey 用的就是这个版本。
+    let argon = Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params);
+    let mut salt = [0_u8; 16];
+    rand::thread_rng().fill_bytes(&mut salt);
+    let mut key = [0_u8; 32];
+    argon
+        .hash_password_into(password.as_bytes(), &salt, &mut key)
+        .map_err(|e| ApiError::new(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let engine = base64::engine::general_purpose::STANDARD_NO_PAD;
+    Ok(format!(
+        "$argon2id$v=19$m=19456,t=2,p=1${}${}",
+        engine.encode(salt),
+        engine.encode(key)
+    ))
+}
+
 pub fn issue_access(claims: &Claims, secret: &[u8]) -> Result<String, ApiError> {
     encode(&Header::default(), claims, &EncodingKey::from_secret(secret))
         .map_err(|e| ApiError::new(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
