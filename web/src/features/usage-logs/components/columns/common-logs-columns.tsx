@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { ColumnDef } from '@tanstack/react-table'
-import { GitBranch, Sparkles, KeyRound } from 'lucide-react'
+import { GitBranch, KeyRound } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -35,33 +35,15 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { usePricingData } from '@/features/pricing/hooks/use-pricing-data'
-import {
-  normalizeTierLabel,
-  parseTaskTiersFromExpr,
-} from '@/features/pricing/lib/billing-expr'
-import {
-  formatTaskUsageUnitPrice,
-  getTaskUsagePriceUnitLabelKey,
-} from '@/features/pricing/lib/dynamic-price'
-import { pluginUsageSchema } from '@/features/pricing/lib/plugin-pricing'
-import { taskUsageUnitLabel } from '@/features/pricing/lib/task-price-display'
-import type { BillingUsageSchema } from '@/features/pricing/types'
 import { getUserAvatarFallback, getUserAvatarStyle } from '@/lib/avatar'
-import { formatBillingCurrencyFromUSD } from '@/lib/currency'
-import { formatLogQuota, formatTimestampToDate } from '@/lib/format'
+import { formatTimestampToDate } from '@/lib/format'
 import { cn } from '@/lib/utils'
-import { useSystemConfigStore } from '@/stores/system-config-store'
 
 import { LOG_TYPE_ALL_VALUE } from '../../constants'
 import type { UsageLog } from '../../data/schema'
 import {
   formatModelName,
-  decodeBillingExprB64,
-  getTieredBillingSummary,
-  hasAnyCacheTokens,
   parseLogOther,
-  isViolationFeeLog,
   logTokenName,
   renderAuditContent,
   renderLogContent,
@@ -70,11 +52,9 @@ import {
   isDisplayableLogType,
   isTimingLogType,
   getLogTypeConfig,
-  isPerCallBilling,
 } from '../../lib/utils'
 import type { LogOtherData } from '../../types'
 import { DetailsDialog } from '../dialogs/details-dialog'
-import { LogCostDisplay } from '../log-cost-display'
 import { ModelBadge } from '../model-badge'
 import { TimingMetricsCell, StreamTpsCell } from '../timing-metrics-cell'
 import { useUsageLogsContext } from '../usage-logs-provider'
@@ -85,57 +65,10 @@ interface DetailSegment {
   danger?: boolean
 }
 
-function formatRatioCompact(ratio: number | undefined): string {
-  if (ratio == null || !Number.isFinite(ratio)) return '-'
-  return ratio % 1 === 0
-    ? String(ratio)
-    : ratio.toFixed(4).replace(/\.?0+$/, '')
-}
-
-function getGroupRatio(other: LogOtherData | null): number | null {
-  const userGroupRatio = other?.user_group_ratio
-  if (
-    userGroupRatio != null &&
-    userGroupRatio !== -1 &&
-    Number.isFinite(userGroupRatio)
-  ) {
-    return userGroupRatio
-  }
-
-  const groupRatio = other?.group_ratio
-  if (groupRatio != null && groupRatio !== 1 && Number.isFinite(groupRatio)) {
-    return groupRatio
-  }
-
-  return null
-}
-
 function buildDetailSegments(
   log: UsageLog,
   other: LogOtherData | null,
-  t: (key: string, opts?: Record<string, unknown>) => string,
-  isAdmin: boolean,
-  language: string,
-  usageSchema?: BillingUsageSchema
-): DetailSegment[] {
-  const segments = buildTypeDetailSegments(log, other, t, language, usageSchema)
-  const adminSegments: DetailSegment[] = []
-  // Quota saturation is a rare, admin-only anomaly marker; surface it first
-  // and in danger styling so it stands out on the related billing log. The
-  // backend already strips admin_info for non-admins; gate on isAdmin too as
-  // defense in depth so the marker never leaks if that changes.
-  if (isAdmin && other?.admin_info?.quota_saturation) {
-    adminSegments.push({ text: t('Quota clamped'), danger: true })
-  }
-  return [...adminSegments, ...segments]
-}
-
-function buildTypeDetailSegments(
-  log: UsageLog,
-  other: LogOtherData | null,
-  t: (key: string, opts?: Record<string, unknown>) => string,
-  language: string,
-  usageSchema?: BillingUsageSchema
+  t: (key: string, opts?: Record<string, unknown>) => string
 ): DetailSegment[] {
   // Top-up, audit, and login logs can carry a localized operation descriptor.
   if (log.type === 1 || log.type === 3 || log.type === 7) {
@@ -147,196 +80,9 @@ function buildTypeDetailSegments(
     return [{ text: t('Async task refund') }]
   }
 
-  if (log.type !== 2) return []
-
-  const isViolation = isViolationFeeLog(other)
-  if (isViolation) {
-    const segments: DetailSegment[] = []
-    segments.push({ text: t('Violation Fee'), danger: true })
-    if (other?.violation_fee_code) {
-      segments.push({
-        text: other.violation_fee_code,
-        muted: true,
-      })
-    }
-    segments.push({
-      text: `${t('Fee')}: ${formatLogQuota(other?.fee_quota ?? log.quota)}`,
-      muted: true,
-    })
-    return segments
-  }
-
-  if (!other) return []
+  if (log.type !== 2 || !other) return []
 
   const segments: DetailSegment[] = []
-
-  const priceOpts = { digitsLarge: 4, digitsSmall: 6, abbreviate: false }
-  const formatPrice = (price: number) =>
-    `${formatBillingCurrencyFromUSD(price, priceOpts)}/M`
-  const formatPriceCompact = (price: number) =>
-    formatBillingCurrencyFromUSD(price, priceOpts)
-  const formatPriceList = (prices: string[], showUnit: boolean) => {
-    const text = prices.join(' / ')
-    return showUnit ? `${text}/M` : text
-  }
-  const isTieredExpr = other.billing_mode === 'tiered_expr'
-  const tieredSummary = getTieredBillingSummary(other)
-  if (isTieredExpr && other.is_task) {
-    const tiers = parseTaskTiersFromExpr(
-      decodeBillingExprB64(other.expr_b64),
-      usageSchema,
-      true
-    )
-    const tier = tiers.find(
-      (entry) =>
-        Boolean(other.matched_tier) &&
-        normalizeTierLabel(entry.label) ===
-          normalizeTierLabel(other.matched_tier)
-    )
-    if (tier) {
-      const prices = Object.entries(tier.unitPrices).map(([field, price]) => {
-        const definition = usageSchema?.[field]
-        const unitKey = getTaskUsagePriceUnitLabelKey(definition?.unit)
-        const unitLabel = taskUsageUnitLabel(definition, language, t(unitKey))
-        return `${field} ${formatTaskUsageUnitPrice(price, { tokenUnit: 'M' })}/${unitLabel}`
-      })
-      if (tier.constant > 0) {
-        prices.push(
-          `${t('Additional charge')} ${formatTaskUsageUnitPrice(tier.constant, { tokenUnit: 'M' })}/${t('request')}`
-        )
-      }
-      segments.push({
-        text: `${tier.label || t('Default')} · ${prices.join(' · ')}`,
-      })
-    } else {
-      segments.push({
-        text: `${t('Dynamic Pricing')} · ${other.matched_tier || t('Special billing expression')}`,
-        muted: true,
-      })
-    }
-  } else if (isTieredExpr) {
-    if (tieredSummary) {
-      const baseEntries = tieredSummary.priceEntries
-        .filter((entry) => ['inputPrice', 'outputPrice'].includes(entry.field))
-        .map((entry) => formatPriceCompact(entry.price))
-      if (baseEntries.length > 0) {
-        const tierLabel = tieredSummary.tier.label || t('Default')
-        segments.push({
-          text: `${tierLabel} · ${formatPriceList(baseEntries, true)}`,
-        })
-      }
-
-      const cacheEntries = tieredSummary.priceEntries
-        .filter((entry) =>
-          [
-            'cacheReadPrice',
-            'cacheCreatePrice',
-            'cacheCreate1hPrice',
-            'cacheCreate12hPrice',
-          ].includes(entry.field)
-        )
-        .map((entry) => {
-          return formatPriceCompact(entry.price)
-        })
-      if (cacheEntries.length > 0) {
-        segments.push({
-          text: `${t('Cache')} ${formatPriceList(cacheEntries, false)}`,
-          muted: true,
-        })
-      }
-
-      const otherEntries = tieredSummary.priceEntries
-        .filter(
-          (entry) =>
-            ![
-              'inputPrice',
-              'outputPrice',
-              'cacheReadPrice',
-              'cacheCreatePrice',
-              'cacheCreate1hPrice',
-              'cacheCreate12hPrice',
-            ].includes(entry.field)
-        )
-        .map((entry) =>
-          entry.unit
-            ? `${tieredSummary.tier.label || t('Default')} · ${t(entry.shortLabel)} ${formatPriceCompact(entry.price)}/${t(entry.unit)}`
-            : `${t(entry.shortLabel)} ${formatPrice(entry.price)}`
-        )
-      if (otherEntries.length > 0) {
-        segments.push({
-          text: otherEntries.join(' · '),
-          muted: true,
-        })
-      }
-    } else {
-      segments.push({
-        text: `${t('Dynamic Pricing')} · ${other.matched_tier || t('Special billing expression')}`,
-        muted: true,
-      })
-    }
-  } else {
-    const modelPrice = other.model_price
-    const isPerCall = isPerCallBilling(modelPrice)
-    if (isPerCall && modelPrice != null) {
-      segments.push({
-        text: `${t('Per-call')} · ${formatBillingCurrencyFromUSD(modelPrice, priceOpts)}`,
-      })
-    } else if (other.model_ratio != null) {
-      const inputPriceUSD = other.model_ratio * 2.0
-      const baseEntries = [formatPriceCompact(inputPriceUSD)]
-      if (other.completion_ratio != null) {
-        baseEntries.push(
-          formatPriceCompact(inputPriceUSD * other.completion_ratio)
-        )
-      }
-      segments.push({
-        text: `${t('Standard')} · ${formatPriceList(baseEntries, true)}`,
-      })
-
-      if (hasAnyCacheTokens(other)) {
-        const cacheEntries = [
-          other.cache_ratio != null && other.cache_ratio !== 1
-            ? formatPriceCompact(inputPriceUSD * other.cache_ratio)
-            : null,
-          other.cache_creation_ratio != null && other.cache_creation_ratio !== 1
-            ? formatPriceCompact(inputPriceUSD * other.cache_creation_ratio)
-            : null,
-          other.cache_creation_ratio_1h != null &&
-          other.cache_creation_ratio_1h !== 0
-            ? formatPriceCompact(inputPriceUSD * other.cache_creation_ratio_1h)
-            : null,
-          other.cache_creation_ratio_12h != null &&
-          other.cache_creation_ratio_12h !== 0
-            ? formatPriceCompact(inputPriceUSD * other.cache_creation_ratio_12h)
-            : null,
-        ].filter(Boolean) as string[]
-
-        if (cacheEntries.length > 0) {
-          segments.push({
-            text: `${t('Cache')} ${formatPriceList(cacheEntries, false)}`,
-            muted: true,
-          })
-        }
-      }
-    } else {
-      const userGroupRatio = other.user_group_ratio
-      const groupRatio = other.group_ratio
-      const isUserGroup =
-        userGroupRatio != null &&
-        Number.isFinite(userGroupRatio) &&
-        userGroupRatio !== -1
-      const effectiveRatio = isUserGroup ? userGroupRatio : groupRatio
-      const ratioLabel = isUserGroup
-        ? t('User Exclusive Ratio')
-        : t('Group Ratio')
-
-      if (effectiveRatio != null && Number.isFinite(effectiveRatio)) {
-        segments.push({
-          text: `${ratioLabel} ${formatRatioCompact(effectiveRatio)}x`,
-        })
-      }
-    }
-  }
 
   if (other.is_system_prompt_overwritten) {
     segments.push({
@@ -350,11 +96,9 @@ function buildTypeDetailSegments(
 
 export function useCommonLogsColumns(
   isAdmin: boolean,
-  isRoot: boolean,
-  showBillingSource = false
+  isRoot: boolean
 ): ColumnDef<UsageLog>[] {
   const { t } = useTranslation()
-  const currency = useSystemConfigStore((state) => state.config.currency)
   return useMemo(() => {
     const columns: ColumnDef<UsageLog>[] = [
       {
@@ -397,17 +141,12 @@ export function useCommonLogsColumns(
           header: t('Channel'),
           accessorFn: (row) => row.channel,
           cell: function ChannelCell({ row }) {
-            const {
-              sensitiveVisible,
-              setAffinityTarget,
-              setAffinityDialogOpen,
-            } = useUsageLogsContext()
+            const { sensitiveVisible } = useUsageLogsContext()
             const log = row.original
 
             if (!isDisplayableLogType(log.type)) return null
 
             const other = parseLogOther(log.other)
-            const affinity = other?.admin_info?.channel_affinity
             const rawUseChannel = other?.admin_info?.use_channel ?? []
             const useChannel = Array.isArray(rawUseChannel)
               ? rawUseChannel.map(String).filter(Boolean)
@@ -486,27 +225,6 @@ export function useCommonLogsColumns(
                           </PopoverContent>
                         </Popover>
                       )}
-                      {affinity && (
-                        <button
-                          type='button'
-                          className='absolute -top-1 -right-1 leading-none text-amber-500'
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setAffinityTarget({
-                              rule_name: affinity.rule_name || '',
-                              using_group:
-                                affinity.using_group ||
-                                affinity.selected_group ||
-                                '',
-                              key_hint: affinity.key_hint || '',
-                              key_fp: affinity.key_fp || '',
-                            })
-                            setAffinityDialogOpen(true)
-                          }}
-                        >
-                          <Sparkles className='size-3 fill-current' />
-                        </button>
-                      )}
                     </div>
                     {log.channel_name && (
                       <span className='text-muted-foreground/70 truncate [font-family:var(--font-body)] !text-xs'>
@@ -528,22 +246,6 @@ export function useCommonLogsColumns(
                         <p className='text-muted-foreground text-xs'>
                           {t('Key')}: {multiKeyIndex}
                         </p>
-                      )}
-                      {affinity && (
-                        <div className='border-t pt-1 text-xs'>
-                          <p className='font-medium'>{t('Channel Affinity')}</p>
-                          <p>
-                            {t('Rule')}: {affinity.rule_name || '-'}
-                          </p>
-                          <p>
-                            {t('Group')}:{' '}
-                            {sensitiveVisible
-                              ? affinity.using_group ||
-                                affinity.selected_group ||
-                                '-'
-                              : '••••'}
-                          </p>
-                        </div>
                       )}
                     </div>
                   </TooltipContent>
@@ -629,7 +331,6 @@ export function useCommonLogsColumns(
         const displayName = sensitiveVisible ? tokenName : '••••'
         let group = log.group
         if (!group) group = other?.group || ''
-        const groupRatio = getGroupRatio(other)
 
         return (
           <div className='flex max-w-[200px] flex-col gap-0.5'>
@@ -652,25 +353,17 @@ export function useCommonLogsColumns(
                 )}
               </Tooltip>
             </TooltipProvider>
-            {(group || groupRatio != null) && (
+            {group ? (
               <span className='block max-w-full truncate text-xs leading-none'>
-                {group ? (
-                  <GroupBadge
-                    group={group}
-                    label={sensitiveVisible ? undefined : '••••'}
-                    type='text'
-                    size='sm'
-                    className='inline align-baseline text-xs leading-none [&>span]:leading-none'
-                  />
-                ) : null}
-                {group && groupRatio != null ? ' ' : null}
-                {groupRatio != null ? (
-                  <span className='text-muted-foreground/60 relative top-px align-baseline tabular-nums'>
-                    {formatRatioCompact(groupRatio)}x
-                  </span>
-                ) : null}
+                <GroupBadge
+                  group={group}
+                  label={sensitiveVisible ? undefined : '••••'}
+                  type='text'
+                  size='sm'
+                  className='inline align-baseline text-xs leading-none [&>span]:leading-none'
+                />
               </span>
-            )}
+            ) : null}
           </div>
         )
       },
@@ -772,24 +465,26 @@ export function useCommonLogsColumns(
         },
       },
       {
-        accessorKey: 'quota',
-        header: t('Cost'),
+        id: 'total_tokens',
+        header: t('Total Tokens'),
+        accessorFn: (row) =>
+          (row.prompt_tokens || 0) + (row.completion_tokens || 0),
         cell: ({ row }) => {
           const log = row.original
           if (!isDisplayableLogType(log.type)) return null
 
-          const quota = row.getValue('quota') as number
-          const other = parseLogOther(log.other)
+          const totalTokens = row.getValue('total_tokens') as number
+          if (totalTokens <= 0) {
+            return <span className='text-muted-foreground text-xs'>-</span>
+          }
+
           return (
-            <LogCostDisplay
-              quota={quota}
-              other={other}
-              showBillingSource={showBillingSource}
-            />
+            <span className='font-mono text-xs font-medium tabular-nums'>
+              {totalTokens.toLocaleString()}
+            </span>
           )
         },
       },
-
       {
         accessorKey: 'use_time',
         header: t('Timing'),
@@ -815,30 +510,12 @@ export function useCommonLogsColumns(
         accessorKey: 'content',
         header: t('Details'),
         cell: function DetailsCell({ row }) {
-          const { t, i18n } = useTranslation()
+          const { t } = useTranslation()
           const [dialogOpen, setDialogOpen] = useState(false)
           const log = row.original
           const other = parseLogOther(log.other)
 
-          const pricingData = usePricingData(
-            log.type === 2 &&
-              other?.is_task === true &&
-              other.billing_mode === 'tiered_expr'
-          )
-          const usageSchema = pluginUsageSchema(
-            pricingData.models.find(
-              (model) => model.model_name === log.model_name
-            ),
-            other?.admin_info?.task_plugin?.key
-          )
-          const segments = buildDetailSegments(
-            log,
-            other,
-            t,
-            isAdmin,
-            i18n.language,
-            usageSchema
-          )
+          const segments = buildDetailSegments(log, other, t)
           const primary = segments[0]
           const hasMore = segments.length > 1
           let primaryTextClass = 'text-foreground'
@@ -900,7 +577,5 @@ export function useCommonLogsColumns(
     )
 
     return columns
-    // Log formatters read currency settings from the store.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [t, isAdmin, isRoot, showBillingSource, currency])
+  }, [t, isAdmin, isRoot])
 }

@@ -107,7 +107,6 @@ describe('usage log CSV export', () => {
       '16',
       '1906',
       '15',
-      '$0.5',
       '3s',
       '203.0.113.9',
       'req-1',
@@ -125,9 +124,7 @@ describe('usage log CSV export', () => {
         other: JSON.stringify({
           cache_tokens: 1906,
           cache_creation_tokens: 1500,
-          cache_creation_ratio: 1.25,
           cache_creation_tokens_12h: 1000,
-          cache_creation_ratio_12h: 2.5,
         }),
       },
       false,
@@ -153,7 +150,7 @@ describe('usage log CSV export', () => {
     const row = getLogCsvRow(topup, false, t)
 
     expect(row.slice(1, 2)).toEqual(['充值'])
-    expect(row.slice(5, 12)).toEqual(['', '', '', '', '', '', ''])
+    expect(row.slice(5, 11)).toEqual(['', '', '', '', '', ''])
     expect(row.at(-1)).toBe('充值 $5')
   })
 

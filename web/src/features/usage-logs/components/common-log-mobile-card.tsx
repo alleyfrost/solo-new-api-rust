@@ -29,7 +29,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { getUserAvatarFallback, getUserAvatarStyle } from '@/lib/avatar'
 import dayjs from '@/lib/dayjs'
-import { formatLogQuota, formatTimestampToDate } from '@/lib/format'
+import { formatTimestampToDate } from '@/lib/format'
 
 import type { UsageLog } from '../data/schema'
 import { formatModelName, logTokenName, parseLogOther } from '../lib/format'
@@ -42,14 +42,7 @@ import { ModelBadge, ResponseModelDetails } from './model-badge'
 import { StreamTpsCell, TimingMetricsCell } from './timing-metrics-cell'
 import { useUsageLogsContext } from './usage-logs-provider'
 
-type FieldName =
-  | 'model'
-  | 'cost'
-  | 'user'
-  | 'channel'
-  | 'token'
-  | 'group'
-  | 'time'
+type FieldName = 'model' | 'user' | 'channel' | 'token' | 'group' | 'time'
 type LogField = {
   label: string
   value: string
@@ -72,20 +65,11 @@ export function CommonLogMobileCard<TData>(props: {
   const model = formatModelName(log)
   const config = getLogTypeConfig(log.type)
   const group = log.group || other?.group || ''
-  const groupRatio =
-    other?.user_group_ratio != null && other.user_group_ratio !== -1
-      ? other.user_group_ratio
-      : other?.group_ratio
   const fields: Record<FieldName, LogField> = {
     model: {
       label: t('Model'),
       value: model.name,
       visible: displayable && props.cells.has('model_name') && !!model.name,
-    },
-    cost: {
-      label: t('Cost'),
-      value: formatLogQuota(log.quota),
-      visible: displayable && props.cells.has('quota'),
     },
     time: {
       label: t('Time'),
@@ -124,7 +108,6 @@ export function CommonLogMobileCard<TData>(props: {
       : undefined
   const metadata: FieldName[] = ['user', 'channel', 'token', 'group']
   const visibleMetadata = metadata.filter((id) => fields[id].visible)
-  const costCell = props.cells.get('quota')
   const contentCell = props.cells.get('content')
   const channelCell = props.cells.get('channel')
   const cacheRead = other?.cache_tokens || 0
@@ -153,11 +136,6 @@ export function CommonLogMobileCard<TData>(props: {
               wrapText
               onInspect={() => setSelectedField('model')}
             />
-          </div>
-        )}
-        {fields.cost.visible && costCell && (
-          <div className='ml-auto max-w-full min-w-0 self-center [overflow-wrap:anywhere] [&_.inline-flex]:h-auto [&_.inline-flex]:min-h-6 [&_.inline-flex]:max-w-full [&_.inline-flex]:flex-wrap'>
-            {flexRender(costCell.column.columnDef.cell, costCell.getContext())}
           </div>
         )}
       </div>
@@ -278,14 +256,6 @@ export function CommonLogMobileCard<TData>(props: {
               </div>
             )
           })}
-          {groupRatio != null &&
-            groupRatio !== 1 &&
-            Number.isFinite(groupRatio) &&
-            props.cells.has('token_name') && (
-              <div className='text-muted-foreground col-span-2 [overflow-wrap:anywhere]'>
-                {t('Group Ratio')}: {groupRatio}×
-              </div>
-            )}
         </div>
       )}
       {showTokens && (

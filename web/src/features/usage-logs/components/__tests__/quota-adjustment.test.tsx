@@ -200,12 +200,6 @@ describe('quota adjustment log localization', () => {
         within(screen.getByRole('dialog')).getByText(scenario.chinese)
       ).toBeInTheDocument()
       expect(screen.queryByText('English export fallback')).toBeNull()
-      if ('target_user_id' in scenario.params) {
-        const dialog = within(screen.getByRole('dialog'))
-        expect(dialog.getByText('quota-owner')).toBeVisible()
-        expect(dialog.getByText('调整前额度')).toBeVisible()
-        expect(dialog.getByText('调整后额度')).toBeVisible()
-      }
     }
   )
 

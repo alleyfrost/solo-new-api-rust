@@ -16,29 +16,27 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import {
   flexRender,
   getCoreRowModel,
   useReactTable,
 } from '@tanstack/react-table'
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { createInstance } from 'i18next'
+import type { ReactNode } from 'react'
 import { I18nextProvider } from 'react-i18next'
-import { afterAll, afterEach, beforeEach, expect, test, vi } from 'vitest'
+import { afterAll, beforeAll, expect, test, vi } from 'vitest'
 
 import en from '@/i18n/locales/en.json'
-import zh from '@/i18n/locales/zh.json'
-import {
-  DEFAULT_CURRENCY_CONFIG,
-  useSystemConfigStore,
-} from '@/stores/system-config-store'
 
 import type { UsageLog } from '../../data/schema'
 import type { LogOtherData } from '../../types'
 import { useCommonLogsColumns } from '../columns/common-logs-columns'
 
+// Provider icons are unused by the log preview; their browser-only
+// dependencies cannot be loaded by Vitest's Node ESM resolver.
 vi.mock('@lobehub/icons', () => ({}))
+
 vi.hoisted(() => {
   vi.stubGlobal('localStorage', {
     getItem: () => null,
@@ -48,17 +46,17 @@ vi.hoisted(() => {
 })
 afterAll(() => vi.unstubAllGlobals())
 
-function makeLog(other: LogOtherData, type = 2): UsageLog {
+function makeLog(other: LogOtherData, type = 2, content = ''): UsageLog {
   return {
     id: 1,
     user_id: 1,
     created_at: 1,
     type,
-    content: '',
+    content,
     username: 'user',
     token_name: 'token',
-    model_name: 'wan2.5-i2v-preview',
-    quota: 5000,
+    model_name: 'gpt-4o-mini',
+    quota: 0,
     prompt_tokens: 0,
     completion_tokens: 0,
     use_time: 0,
@@ -78,9 +76,10 @@ function DetailPreview(props: {
   other: LogOtherData
   isAdmin: boolean
   type?: number
+  content?: string
 }) {
   const table = useReactTable({
-    data: [makeLog(props.other, props.type)],
+    data: [makeLog(props.other, props.type, props.content)],
     columns: useCommonLogsColumns(props.isAdmin, false),
     getCoreRowModel: getCoreRowModel(),
   })
@@ -91,202 +90,59 @@ function DetailPreview(props: {
   if (!cell) throw new Error('The log must have a content column')
   return flexRender(cell.column.columnDef.cell, cell.getContext())
 }
-const plugin = {
-  key: 'incho',
-  name: 'Incho',
-  version: '1.0.1',
-  author: { name: 'Plugin maintainer' },
-}
-const previousConfig = useSystemConfigStore.getState().config
-let client: QueryClient
+
 const i18n = createInstance()
-beforeEach(async () => {
+beforeAll(async () => {
   await i18n.init({
     lng: 'en',
+    fallbackLng: 'en',
     resources: { en },
     interpolation: { escapeValue: false },
   })
-  useSystemConfigStore
-    .getState()
-    .setConfig({ currency: { ...DEFAULT_CURRENCY_CONFIG } })
-  client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  client.setQueryData(['status'], {}, { updatedAt: Date.now() + 60_000 })
-  client.setQueryData(
-    ['pricing'],
-    { data: [], vendors: [] },
-    { updatedAt: Date.now() + 60_000 }
-  )
 })
-afterEach(() => {
-  client.clear()
-  useSystemConfigStore.getState().setConfig(previousConfig)
-})
-function renderPreview(other: LogOtherData, isAdmin = true, type?: number) {
+
+function renderPreview(
+  other: LogOtherData,
+  isAdmin = true,
+  type?: number,
+  content?: string
+) {
   render(
     <I18nextProvider i18n={i18n}>
-      <QueryClientProvider client={client}>
-        <DetailPreview other={other} isAdmin={isAdmin} type={type} />
-      </QueryClientProvider>
+      <DetailPreview
+        other={other}
+        isAdmin={isAdmin}
+        type={type}
+        content={content}
+      />
     </I18nextProvider>
   )
   return screen.getByRole('button', { name: /./ })
 }
 
-test('keeps log details open when the parent refreshes with unchanged data', async () => {
-  const other = { model_price: 0.25 }
-  const wrapper = ({ children }: { children: React.ReactNode }) => (
-    <I18nextProvider i18n={i18n}>
-      <QueryClientProvider client={client}>{children}</QueryClientProvider>
-    </I18nextProvider>
+test('usage log previews stay neutral without any money markers', () => {
+  const preview = renderPreview({ cache_tokens: 100, frt: 320 })
+  expect(preview.textContent).toBe('—')
+})
+
+test('preview falls back to the recorded raw content', () => {
+  const preview = renderPreview({}, true, 2, 'Channel test request')
+  expect(preview.textContent).toBe('Channel test request')
+})
+
+test('system prompt overrides are flagged in the preview', () => {
+  const preview = renderPreview({ is_system_prompt_overwritten: true })
+  expect(preview.textContent).toBe('System Prompt Override')
+})
+
+test('refund logs preview the async task refund marker', () => {
+  const preview = renderPreview(
+    { task_id: 'task-1', reason: 'failed' },
+    true,
+    6
   )
-  const { rerender } = render(<DetailPreview other={other} isAdmin />, {
-    wrapper,
-  })
-  fireEvent.click(screen.getByRole('button', { name: 'Per-call · $0.25' }))
-  expect(await screen.findByRole('dialog')).toBeVisible()
-  rerender(<DetailPreview other={other} isAdmin />)
-  expect(screen.getByRole('dialog')).toBeVisible()
+  expect(preview.textContent).toBe('Async task refund')
 })
-
-test.each([
-  {
-    name: 'fixed expression zero price',
-    other: {
-      billing_mode: 'tiered_expr',
-      billing_unit: 'request' as const,
-      fixed_price: 0,
-      matched_tier: 'free',
-      expr_b64: btoa('tier("free", fixed(0))'),
-    },
-    expected: 'free · Per-call $0/request',
-  },
-  {
-    name: 'fixed expression trace outside the display grammar',
-    other: {
-      billing_mode: 'tiered_expr',
-      billing_unit: 'request' as const,
-      fixed_price: 0.01,
-      matched_tier: 'priority',
-      expr_b64: btoa(
-        'param("fast") == true ? tier("priority", fixed(0.01)) : tier("tokens", p * 2)'
-      ),
-    },
-    expected: 'priority · Per-call $0.01/request',
-  },
-  {
-    name: 'parsed token expression',
-    other: {
-      billing_mode: 'tiered_expr',
-      matched_tier: 'standard',
-      expr_b64: btoa('tier("standard", p * 2 + c * 10)'),
-    },
-    expected: 'standard · $2 / $10/M',
-  },
-  {
-    name: 'per-call',
-    other: { model_price: 0.25 },
-    expected: 'Per-call · $0.25',
-  },
-  {
-    name: 'standard',
-    other: { model_ratio: 1, completion_ratio: 2 },
-    expected: 'Standard · $2 / $4/M',
-  },
-  {
-    name: 'zero price fallback',
-    other: { model_price: 0, group_ratio: 1 },
-    expected: 'Group Ratio 1x',
-  },
-  { name: 'missing price fallback', other: {}, expected: '—' },
-])('$name stays visible without a plugin counter', ({ other, expected }) => {
-  const preview = renderPreview({
-    ...other,
-    admin_info: { task_plugin: plugin },
-  })
-  expect(preview.textContent).toBe(expected)
-})
-
-test.each([
-  {
-    tier: 'standard',
-    billingUnit: 'token' as const,
-    fixedPrice: undefined,
-    expected: 'Dynamic Pricing · standard',
-  },
-  {
-    tier: 'long_context',
-    billingUnit: 'token' as const,
-    fixedPrice: undefined,
-    expected: 'Dynamic Pricing · long_context',
-  },
-  {
-    tier: 'free_small_output',
-    billingUnit: 'request' as const,
-    fixedPrice: 0,
-    expected: 'free_small_output · Per-call $0/request',
-  },
-])(
-  'nested expression preserves the recorded $tier settlement in the list',
-  ({ tier, billingUnit, fixedPrice, expected }) => {
-    const expression = `len <= 272000
-      ? (c > 5
-        ? tier("standard", p * 2 + c * 10 + cr * 0.1 + cc * 2.5)
-        : tier("free_small_output", fixed(0)))
-      : (c > 5
-        ? tier("long_context", p * 5 + c * 22.5 + cr * 0.5)
-        : tier("free_small_output", fixed(0)))`
-    const preview = renderPreview({
-      billing_mode: 'tiered_expr',
-      billing_unit: billingUnit,
-      fixed_price: fixedPrice,
-      matched_tier: tier,
-      expr_b64: btoa(expression),
-    })
-    expect(preview.textContent).toBe(expected)
-  }
-)
-
-test.each([
-  { name: 'missing expression', expr: undefined },
-  { name: 'invalid encoded expression', expr: '%' },
-  {
-    name: 'tier absent from the parsed expression',
-    expr: btoa('tier("different", p * 99 + c * 99)'),
-  },
-])(
-  'token pricing with $name preserves the saved tier without guessing prices',
-  ({ expr }) => {
-    const preview = renderPreview({
-      billing_mode: 'tiered_expr',
-      matched_tier: 'recorded',
-      expr_b64: expr,
-    })
-    expect(preview.textContent).toBe('Dynamic Pricing · recorded')
-  }
-)
-
-test.each([false, true])(
-  'dynamic pricing without a saved tier uses a localized neutral fallback for task=%s',
-  async (isTask) => {
-    i18n.addResourceBundle('zh', 'translation', zh.translation)
-    const preview = renderPreview({
-      is_task: isTask,
-      billing_mode: 'tiered_expr',
-      expr_b64: btoa(
-        isTask
-          ? 'tier("base", u("clips") * 0.25)'
-          : 'tier("base", p * 2 + c * 10)'
-      ),
-    })
-    expect(preview.textContent).toBe(
-      'Dynamic Pricing · Special billing expression'
-    )
-    await act(() => i18n.changeLanguage('zh'))
-    expect(
-      screen.getByRole('button', { name: '动态计费 · 特殊计费表达式' })
-    ).toBeVisible()
-  }
-)
 
 test('top-up content_parts render in the viewer language', async () => {
   i18n.addResourceBundle('zh', 'translation', {
@@ -299,7 +155,7 @@ test('top-up content_parts render in the viewer language', async () => {
       content_parts: [
         {
           key: 'Online top-up succeeded, amount added: {{quota}}, payment amount: {{amount}}',
-          params: { quota: '$10.000000', amount: '10.00' },
+          params: { quota: '10.000000', amount: '10.00' },
         },
       ],
     },
@@ -307,197 +163,25 @@ test('top-up content_parts render in the viewer language', async () => {
     1
   )
   expect(preview.textContent).toBe(
-    '在线充值成功，充值额度：$10.000000，支付金额：10.00'
+    '在线充值成功，充值额度：10.000000，支付金额：10.00'
   )
+  await i18n.changeLanguage('en')
 })
 
-test('quota saturation remains first and only billing adds to the counter', () => {
-  const preview = renderPreview({
-    model_price: 0.25,
-    admin_info: {
-      task_plugin: plugin,
-      quota_saturation: {
-        op: 'round',
-        kind: 'overflow',
-        original: 3e9,
-        clamped: 2147483647,
-      },
-    },
+test('keeps log details open when the parent refreshes with unchanged data', async () => {
+  const other: LogOtherData = { is_system_prompt_overwritten: true }
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <I18nextProvider i18n={i18n}>{children}</I18nextProvider>
+  )
+  const { rerender } = render(<DetailPreview other={other} isAdmin />, {
+    wrapper,
   })
-  expect(preview.textContent).toBe('Quota clamped+1')
+  fireEvent.click(
+    screen.getByRole('button', { name: 'System Prompt Override' })
+  )
+  const dialog = await screen.findByRole('dialog')
+  expect(dialog).toBeVisible()
+  expect(within(dialog).getByText('Overwritten')).toBeVisible()
+  rerender(<DetailPreview other={other} isAdmin />)
+  expect(screen.getByRole('dialog')).toBeVisible()
 })
-
-test.each([true, false])(
-  'plugin information in the opened dialog respects admin=%s',
-  async (isAdmin) => {
-    const preview = renderPreview(
-      { model_price: 0.25, admin_info: { task_plugin: plugin } },
-      isAdmin
-    )
-    expect(preview.textContent).toBe('Per-call · $0.25')
-    fireEvent.click(preview)
-    const dialog = within(await screen.findByRole('dialog'))
-    if (isAdmin) {
-      expect(dialog.getByText('Incho')).toBeVisible()
-      expect(dialog.getByText('1.0.1')).toBeVisible()
-      expect(dialog.getByText('Plugin maintainer')).toBeVisible()
-    } else {
-      expect(dialog.queryByText('Incho')).not.toBeInTheDocument()
-      expect(dialog.queryByText('Plugin maintainer')).not.toBeInTheDocument()
-    }
-  }
-)
-
-test.each([
-  {
-    expression: 'tier("music", u("clips") * 0.25)',
-    tier: 'music',
-    expected: 'music · clips $0.25/unit',
-  },
-  {
-    expression:
-      'u("mode") == "pro" ? tier("pro", u("seconds") * 0.8) : tier("std", u("seconds") * 0.4)',
-    tier: 'pro',
-    expected: 'pro · seconds $0.8/second',
-  },
-  {
-    expression: 'tier("tokens", u("tokens") * 9.8 / 1000000)',
-    tier: 'tokens',
-    expected: 'tokens · tokens $9.8/1M token',
-  },
-  {
-    expression: 'tier("free", u("clips") * 0)',
-    tier: 'free',
-    expected: 'free · clips $0/unit',
-  },
-  {
-    expression: 'tier("mixed", 0.1 + u("clips") * 0.25 + u("units") * 0.14)',
-    tier: 'mixed',
-    expected:
-      'mixed · clips $0.25/unit · units $0.14/credit · Additional charge $0.1/request',
-  },
-])(
-  'task expression $tier shows its recorded unit price',
-  ({ expression, tier, expected }) => {
-    client.setQueryData(['pricing'], {
-      data: [
-        {
-          model_name: 'wan2.5-i2v-preview',
-          billing_expr: 'tier("current", u("clips") * 99)',
-          billing_usage_schema: {
-            clips: { type: 'number', unit: 'count' },
-            seconds: { type: 'number', unit: 'second' },
-            tokens: { type: 'number', unit: 'token' },
-            units: { type: 'number', unit: 'credit' },
-            mode: { enum: ['pro', 'std'] },
-          },
-        },
-      ],
-      vendors: [],
-    })
-    const preview = renderPreview({
-      is_task: true,
-      billing_mode: 'tiered_expr',
-      expr_b64: Buffer.from(expression).toString('base64'),
-      matched_tier: tier,
-      model_price: 0,
-      admin_info: { task_plugin: plugin },
-    })
-    expect(preview.textContent).toBe(expected)
-  }
-)
-
-test('task log prices use localized unit labels from pricing metadata', async () => {
-  client.setQueryData(['pricing'], {
-    data: [
-      {
-        model_name: 'wan2.5-i2v-preview',
-        billing_usage_schema: {
-          images: {
-            type: 'number',
-            unit: 'count',
-            unitLabel: { en: 'image', zh: '张' },
-          },
-        },
-      },
-    ],
-    vendors: [],
-  })
-  const preview = renderPreview({
-    is_task: true,
-    billing_mode: 'tiered_expr',
-    expr_b64: btoa('tier("images", u("images") * 0.25)'),
-    matched_tier: 'images',
-  })
-  expect(preview).toHaveTextContent('images · images $0.25/image')
-  await act(() => i18n.changeLanguage('zh-CN'))
-  expect(
-    screen.getByRole('button', { name: /images · images/ })
-  ).toHaveTextContent('images · images $0.25/张')
-})
-
-test('task log prices select the executing provider’s schema', () => {
-  client.setQueryData(['pricing'], {
-    data: [
-      {
-        model_name: 'wan2.5-i2v-preview',
-        billing_usage_schema: { seconds: { type: 'number', unit: 'second' } },
-        billing_plugin_variants: [
-          {
-            plugin_key: 'beta',
-            plugin_name: 'Beta',
-            billing_expr: 'tier("images", u("images") * 0.25)',
-            billing_usage_schema: {
-              images: {
-                type: 'number',
-                unit: 'count',
-                unitLabel: { en: 'image' },
-              },
-            },
-          },
-        ],
-      },
-    ],
-    vendors: [],
-  })
-  const preview = renderPreview({
-    is_task: true,
-    billing_mode: 'tiered_expr',
-    expr_b64: btoa('tier("images", u("images") * 0.25)'),
-    matched_tier: 'images',
-    admin_info: {
-      task_plugin: { key: 'beta', name: 'Beta', version: '1.0.0' },
-    },
-  })
-  expect(preview).toHaveTextContent('images · images $0.25/image')
-})
-
-test.each(['missing schema', 'unsupported expression', 'unknown tier'])(
-  'task pricing with %s preserves the saved tier without guessing prices',
-  (scenario) => {
-    if (scenario !== 'missing schema') {
-      client.setQueryData(['pricing'], {
-        data: [
-          {
-            model_name: 'wan2.5-i2v-preview',
-            billing_usage_schema: { clips: { type: 'number', unit: 'count' } },
-          },
-        ],
-        vendors: [],
-      })
-    }
-    const expression =
-      scenario === 'unsupported expression'
-        ? 'tier("music", max(u("clips"), 1) * 0.25)'
-        : 'tier("music", u("clips") * 0.25)'
-    const preview = renderPreview({
-      is_task: true,
-      billing_mode: 'tiered_expr',
-      expr_b64: Buffer.from(expression).toString('base64'),
-      matched_tier: scenario === 'unknown tier' ? 'old' : 'music',
-    })
-    expect(preview.textContent).toBe(
-      `Dynamic Pricing · ${scenario === 'unknown tier' ? 'old' : 'music'}`
-    )
-  }
-)

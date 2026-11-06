@@ -16,25 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type { TFunction } from 'i18next'
-/*
-Copyright (C) 2023-2026 QuantumNous
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as
-published by the Free Software Foundation, either version 3 of the
-License, or (at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU Affero General Public License for more details.
-
-You should have received a copy of the GNU Affero General Public License
-along with this program. If not, see <https://www.gnu.org/licenses/>.
-
-For commercial licensing, please contact support@quantumnous.com
-*/
 import {
   Copy,
   Check,
@@ -42,8 +23,6 @@ import {
   Settings2,
   AlertTriangle,
   Headphones,
-  Monitor,
-  Cloud,
   Globe,
   ShieldCheck,
   UserCog,
@@ -56,27 +35,16 @@ import { Dialog } from '@/components/dialog'
 import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
-import { DynamicPricingBreakdown } from '@/features/pricing/components/dynamic-pricing-breakdown'
-import { usePricingData } from '@/features/pricing/hooks/use-pricing-data'
-import { BILLING_PRICING_VARS } from '@/features/pricing/lib/billing-expr'
-import { pluginUsageSchema } from '@/features/pricing/lib/plugin-pricing'
-import { PolicyDecisionRecord } from '@/features/system-settings/request-policies/decision-record'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
-import { formatBillingCurrencyFromUSD } from '@/lib/currency'
-import { formatLogQuota, formatTokens, formatUseTime } from '@/lib/format'
+import { formatTokens, formatUseTime } from '@/lib/format'
 import { translateServerText } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 
-import { AuditDetailFields } from '../../audit/components/audit-detail-fields'
 import type { UsageLog } from '../../data/schema'
 import {
   parseLogOther,
   getParamOverrideActionLabel,
   parseAuditLine,
-  decodeBillingExprB64,
-  getTieredBillingSummary,
-  hasAnyCacheTokens,
-  isViolationFeeLog,
   getFirstResponseTimeColor,
   getResponseTimeColor,
   getReasoningEffortVariant,
@@ -84,15 +52,9 @@ import {
   renderAuditContent,
   renderLogContent,
 } from '../../lib/format'
-import { buildQuotaAuditOperation } from '../../lib/quota-audit-operation'
-import {
-  getLogTypeConfig,
-  isPerCallBilling,
-  isTimingLogType,
-} from '../../lib/utils'
-import { USAGE_BILLING_PATH, type LogOtherData } from '../../types'
+import { getLogTypeConfig, isTimingLogType } from '../../lib/utils'
+import type { LogOtherData } from '../../types'
 import { ResponseModelDetails } from '../model-badge'
-import { PluginAuthorLink } from '../plugin-author-link'
 import { DetailRow, DetailSection } from './log-detail-layout'
 
 // Maps a channel-update changed-field token (as recorded by the backend audit)
@@ -112,282 +74,6 @@ function timingTextColorClass(
   if (variant === 'success') return 'text-emerald-600'
   if (variant === 'warning') return 'text-amber-600'
   return 'text-rose-600'
-}
-
-function formatRatio(ratio: number | undefined): string {
-  if (ratio == null) return '-'
-  return ratio.toFixed(4)
-}
-
-function getUsageBillingPathLabel(
-  t: TFunction,
-  adminInfo: LogOtherData['admin_info']
-): string {
-  switch (adminInfo?.usage_billing_path) {
-    case USAGE_BILLING_PATH.LOCAL:
-      return t('Local Billing')
-    case USAGE_BILLING_PATH.OPENAI:
-      return t('Upstream Response (billing-usage-openai)')
-    case USAGE_BILLING_PATH.OPENAI_ESTIMATED:
-      return t('Upstream Response (billing-usage-openai-estimated)')
-    case USAGE_BILLING_PATH.ANTHROPIC:
-      return t('Upstream Response (billing-usage-anthropic)')
-    case USAGE_BILLING_PATH.ANTHROPIC_ESTIMATED:
-      return t('Upstream Response (billing-usage-anthropic-estimated)')
-    case USAGE_BILLING_PATH.GEMINI:
-      return t('Upstream Response (billing-usage-gemini)')
-    case USAGE_BILLING_PATH.GEMINI_ESTIMATED:
-      return t('Upstream Response (billing-usage-gemini-estimated)')
-    case USAGE_BILLING_PATH.UPSTREAM:
-      return t('Upstream Response')
-    default:
-      return adminInfo?.local_count_tokens
-        ? t('Local Billing')
-        : t('Upstream Response')
-  }
-}
-
-function isUsageBillingPathLocal(
-  adminInfo: LogOtherData['admin_info']
-): boolean {
-  if (adminInfo?.usage_billing_path) {
-    return adminInfo.usage_billing_path === USAGE_BILLING_PATH.LOCAL
-  }
-  return adminInfo?.local_count_tokens === true
-}
-
-function quotaSaturationKindLabel(
-  kind: 'overflow' | 'underflow' | 'nan',
-  t: (key: string) => string
-): string {
-  if (kind === 'overflow') return t('Overflow')
-  if (kind === 'underflow') return t('Underflow')
-  return t('Invalid (NaN)')
-}
-
-function BillingBreakdown(props: {
-  log: UsageLog
-  other: LogOtherData
-  isAdmin: boolean
-}) {
-  const { t } = useTranslation()
-  const { log, other, isAdmin } = props
-  const isPerCall = isPerCallBilling(other.model_price)
-  const isClaude = other.claude === true
-  // OpenAI 12-hour cache writes have their own price, listed like Claude's.
-  const hasCacheWrite12h = (other.cache_creation_tokens_12h || 0) > 0
-  const isTieredExpr = other.billing_mode === 'tiered_expr'
-  const tieredSummary = getTieredBillingSummary(other)
-
-  const rows: Array<{ label: string; value: string }> = []
-  const priceOpts = { digitsLarge: 4, digitsSmall: 6, abbreviate: false }
-  const fmtPrice = (usd: number) => formatBillingCurrencyFromUSD(usd, priceOpts)
-  const baseInputUSD = other.model_ratio != null ? other.model_ratio * 2.0 : 0
-
-  if (isTieredExpr) {
-    rows.push({
-      label: t('Billing Mode'),
-      value: t('Dynamic Pricing'),
-    })
-    if (tieredSummary) {
-      if (tieredSummary.tier.label) {
-        rows.push({
-          label: t('Matched Tier'),
-          value: tieredSummary.tier.label,
-        })
-      }
-      for (const entry of tieredSummary.priceEntries) {
-        rows.push({
-          label: t(entry.shortLabel),
-          value: `${fmtPrice(entry.price)}/${entry.unit ? t(entry.unit) : 'M'}`,
-        })
-      }
-    } else {
-      rows.push({
-        label: t('Matched Tier'),
-        value: other.matched_tier || t('No matching results'),
-      })
-    }
-  } else if (isPerCall) {
-    rows.push({ label: t('Billing Mode'), value: t('Per-call') })
-    if (other.model_price != null) {
-      rows.push({
-        label: t('Model Price'),
-        value: fmtPrice(other.model_price),
-      })
-    }
-  } else {
-    rows.push({ label: t('Billing Mode'), value: t('Per-token') })
-    if (other.model_ratio != null) {
-      rows.push({
-        label: t('Input'),
-        value: `${fmtPrice(baseInputUSD)}/M`,
-      })
-    }
-    if (other.completion_ratio != null && other.model_ratio != null) {
-      rows.push({
-        label: t('Output'),
-        value: `${fmtPrice(baseInputUSD * other.completion_ratio)}/M`,
-      })
-    }
-  }
-
-  const userGR = other.user_group_ratio
-  const isUserGR = userGR != null && Number.isFinite(userGR) && userGR !== -1
-  const effectiveGR = isUserGR ? userGR : other.group_ratio
-  if (effectiveGR != null && Number.isFinite(effectiveGR)) {
-    rows.push({
-      label: isUserGR ? t('User Exclusive Ratio') : t('Group Ratio'),
-      value: `${formatRatio(effectiveGR)}x`,
-    })
-  }
-
-  if (
-    !isTieredExpr &&
-    (isClaude || hasCacheWrite12h) &&
-    hasAnyCacheTokens(other)
-  ) {
-    if (other.cache_ratio != null && other.cache_ratio !== 1) {
-      rows.push({
-        label: t('Cache Read'),
-        value: `${fmtPrice(baseInputUSD * other.cache_ratio)}/M`,
-      })
-    }
-    if (
-      other.cache_creation_ratio != null &&
-      other.cache_creation_ratio !== 1
-    ) {
-      rows.push({
-        label: hasCacheWrite12h
-          ? t('Cache Creation (30m)')
-          : t('Cache Creation'),
-        value: `${fmtPrice(baseInputUSD * other.cache_creation_ratio)}/M`,
-      })
-    }
-    if (
-      other.cache_creation_ratio_5m != null &&
-      other.cache_creation_ratio_5m !== 0
-    ) {
-      rows.push({
-        label: t('Cache Creation (5m)'),
-        value: `${fmtPrice(baseInputUSD * other.cache_creation_ratio_5m)}/M`,
-      })
-    }
-    if (
-      other.cache_creation_ratio_1h != null &&
-      other.cache_creation_ratio_1h !== 0
-    ) {
-      rows.push({
-        label: t('Cache Creation (1h)'),
-        value: `${fmtPrice(baseInputUSD * other.cache_creation_ratio_1h)}/M`,
-      })
-    }
-    if (
-      other.cache_creation_ratio_12h != null &&
-      other.cache_creation_ratio_12h !== 0
-    ) {
-      rows.push({
-        label: t('Cache Creation (12h)'),
-        value: `${fmtPrice(baseInputUSD * other.cache_creation_ratio_12h)}/M`,
-      })
-    }
-  }
-
-  if (!isTieredExpr) {
-    if (other.audio_ratio != null && other.audio_ratio !== 1) {
-      rows.push({
-        label: t('Audio input'),
-        value: `${fmtPrice(baseInputUSD * other.audio_ratio)}/M`,
-      })
-    }
-
-    if (
-      other.audio_completion_ratio != null &&
-      other.audio_completion_ratio !== 1
-    ) {
-      rows.push({
-        label: t('Audio output'),
-        value: `${fmtPrice(baseInputUSD * other.audio_completion_ratio)}/M`,
-      })
-    }
-
-    if (other.image_ratio != null && other.image_ratio !== 1) {
-      rows.push({
-        label: t('Image input'),
-        value: `${fmtPrice(baseInputUSD * other.image_ratio)}/M`,
-      })
-    }
-  }
-
-  if (other.web_search && other.web_search_call_count) {
-    rows.push({
-      label: t('Web Search'),
-      value: `${other.web_search_call_count}x${other.web_search_price ? ` (${fmtPrice(other.web_search_price)})` : ''}`,
-    })
-  }
-
-  if (other.file_search && other.file_search_call_count) {
-    rows.push({
-      label: t('File Search'),
-      value: `${other.file_search_call_count}x${other.file_search_price ? ` (${fmtPrice(other.file_search_price)})` : ''}`,
-    })
-  }
-
-  if (other.image_generation_call && other.image_generation_call_price) {
-    rows.push({
-      label: t('Image Generation'),
-      value: fmtPrice(other.image_generation_call_price),
-    })
-  }
-
-  if (other.audio_input_seperate_price && other.audio_input_price) {
-    rows.push({
-      label: t('Audio Input Price'),
-      value: fmtPrice(other.audio_input_price),
-    })
-  }
-
-  if (isAdmin && other.admin_info) {
-    rows.push({
-      label: t('Billing Path'),
-      value: getUsageBillingPathLabel(t, other.admin_info),
-    })
-  }
-
-  const usageFacts =
-    other.usage_facts != null &&
-    typeof other.usage_facts === 'object' &&
-    !Array.isArray(other.usage_facts)
-      ? Object.entries(other.usage_facts)
-      : []
-
-  return (
-    <DetailSection label={t('Billing Details')}>
-      {rows.map((row) => (
-        <DetailRow key={row.label} label={row.label} value={row.value} mono />
-      ))}
-      {usageFacts.length > 0 && (
-        <>
-          <Label className='text-xs font-semibold'>
-            {t('Usage parameters')}
-          </Label>
-          {usageFacts.map(([key, value]) => (
-            <DetailRow
-              key={`usage-fact-${key}`}
-              label={key}
-              value={String(value)}
-              mono
-            />
-          ))}
-        </>
-      )}
-      <DetailRow
-        label={t('Total Cost')}
-        value={formatLogQuota(log.quota)}
-        mono
-      />
-    </DetailSection>
-  )
 }
 
 function TokenBreakdown(props: { log: UsageLog; other: LogOtherData }) {
@@ -414,6 +100,10 @@ function TokenBreakdown(props: { log: UsageLog; other: LogOtherData }) {
   rows.push({
     label: t('Output Tokens'),
     value: completionTokens.toLocaleString(),
+  })
+  rows.push({
+    label: t('Total Tokens'),
+    value: (promptTokens + completionTokens).toLocaleString(),
   })
 
   if (cacheRead > 0) {
@@ -470,19 +160,18 @@ function TokenBreakdown(props: { log: UsageLog; other: LogOtherData }) {
     })
   }
 
-  if (other.image && other.image_output) {
-    rows.push({
-      label: t('Image Tokens'),
-      value: other.image_output.toLocaleString(),
-    })
-  }
+  // Historical rows may carry a per-kind token breakdown. Show it generically
+  // from the payload keys so no pricing data is needed.
+  const billingTokenEntries = Object.entries(other.billing_tokens ?? {}).filter(
+    ([, count]) => Number.isFinite(count)
+  )
 
   return (
     <DetailSection label={t('Token Breakdown')}>
       {rows.map((row) => (
         <DetailRow key={row.label} label={row.label} value={row.value} mono />
       ))}
-      {other.billing_tokens && (
+      {billingTokenEntries.length > 0 && (
         <div
           role='group'
           aria-label={t('Billable token breakdown')}
@@ -491,18 +180,14 @@ function TokenBreakdown(props: { log: UsageLog; other: LogOtherData }) {
           <Label className='text-xs font-semibold'>
             {t('Billable token breakdown')}
           </Label>
-          {BILLING_PRICING_VARS.map((variable) => {
-            const count = other.billing_tokens?.[variable.key]
-            if (count === undefined || !Number.isFinite(count)) return null
-            return (
-              <DetailRow
-                key={variable.key}
-                label={t(variable.shortLabel)}
-                value={count.toLocaleString()}
-                mono
-              />
-            )
-          })}
+          {billingTokenEntries.map(([key, count]) => (
+            <DetailRow
+              key={key}
+              label={key}
+              value={count.toLocaleString()}
+              mono
+            />
+          ))}
         </div>
       )}
     </DetailSection>
@@ -523,24 +208,9 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const other = parseLogOther(props.log.other)
   const typeConfig = getLogTypeConfig(props.log.type)
 
-  const isViolation = isViolationFeeLog(other)
   const isRefund = props.log.type === 6
-  const isConsume = props.log.type === 2
   const isTopup = props.log.type === 1
   const isManage = props.log.type === 3
-  const isSubscription = other?.billing_source === 'subscription'
-  const isTieredBilling =
-    isConsume &&
-    !isViolation &&
-    other?.billing_mode === 'tiered_expr' &&
-    !!other?.expr_b64
-  const pricingData = usePricingData(props.open && isTieredBilling)
-  const billingUsageSchema = pluginUsageSchema(
-    pricingData.models.find(
-      (model) => model.model_name === props.log.model_name
-    ),
-    other?.admin_info?.task_plugin?.key
-  )
   const hasAudioTokens = other?.ws || other?.audio
   const showTiming = isTimingLogType(props.log.type)
   const showAdminIp =
@@ -599,14 +269,6 @@ export function DetailsDialog(props: DetailsDialogProps) {
   })()
 
   // Top-up, audit, and login logs share the language-independent descriptor.
-  const quotaOperation = isTopup
-    ? buildQuotaAuditOperation(
-        other?.op?.action ?? '',
-        other?.op?.params ?? {},
-        true,
-        t
-      )
-    : null
   const operationText = renderAuditContent(other, t)
   const details =
     (isTopup ? operationText : null) ??
@@ -667,6 +329,13 @@ export function DetailsDialog(props: DetailsDialogProps) {
     other?.reasoning_effort
   )
 
+  const usageFacts =
+    other?.usage_facts != null &&
+    typeof other.usage_facts === 'object' &&
+    !Array.isArray(other.usage_facts)
+      ? Object.entries(other.usage_facts)
+      : []
+
   return (
     <Dialog
       open={props.open}
@@ -686,7 +355,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
       contentClassName={cn(
         'min-w-0 overflow-hidden',
         'max-sm:max-h-(--dialog-available-height) max-sm:w-[calc(100vw-1.5rem)] max-sm:max-w-[calc(100vw-1.5rem)] max-sm:p-4',
-        isTieredBilling ? 'sm:max-w-4xl lg:max-w-5xl' : 'sm:max-w-lg'
+        'sm:max-w-lg'
       )}
       headerClassName='max-sm:gap-1'
       titleClassName='flex items-center gap-2 text-base'
@@ -840,49 +509,6 @@ export function DetailsDialog(props: DetailsDialogProps) {
           </DetailSection>
         )}
 
-        {/* Quota saturation marker (admin only) */}
-        {props.isAdmin && adminInfo?.request_policy?.length ? (
-          <DetailSection
-            label={t('Request policy decisions')}
-            icon={<Route className='size-4' />}
-          >
-            <PolicyDecisionRecord events={adminInfo.request_policy} />
-          </DetailSection>
-        ) : null}
-        {props.isAdmin && other?.admin_info?.quota_saturation && (
-          <DetailSection
-            icon={<AlertTriangle className='size-3.5' aria-hidden='true' />}
-            label={t('Quota clamped')}
-            variant='danger'
-          >
-            <p className='mb-1 text-xs wrap-break-word'>
-              {t('Quota saturation protection triggered')}
-            </p>
-            <DetailRow
-              label={t('Kind')}
-              value={quotaSaturationKindLabel(
-                other.admin_info.quota_saturation.kind,
-                t
-              )}
-            />
-            <DetailRow
-              label={t('Original value')}
-              value={String(other.admin_info.quota_saturation.original)}
-              mono
-            />
-            <DetailRow
-              label={t('Clamped to')}
-              value={String(other.admin_info.quota_saturation.clamped)}
-              mono
-            />
-            <DetailRow
-              label={t('Operation')}
-              value={other.admin_info.quota_saturation.op}
-              mono
-            />
-          </DetailSection>
-        )}
-
         {/* Reject reason (admin only) */}
         {props.isAdmin && adminInfo?.reject_reason && (
           <DetailSection
@@ -891,34 +517,6 @@ export function DetailsDialog(props: DetailsDialogProps) {
             variant='danger'
           >
             <p className='text-xs wrap-break-word'>{adminInfo.reject_reason}</p>
-          </DetailSection>
-        )}
-
-        {/* Violation fee info */}
-        {isViolation && other && (
-          <DetailSection
-            icon={<AlertTriangle className='size-3.5' aria-hidden='true' />}
-            label={t('Violation Fee')}
-            variant='danger'
-          >
-            {other.violation_fee_code && (
-              <DetailRow
-                label={t('Violation Code')}
-                value={other.violation_fee_code}
-                mono
-              />
-            )}
-            {other.violation_fee_marker && (
-              <DetailRow
-                label={t('Violation Marker')}
-                value={other.violation_fee_marker}
-              />
-            )}
-            <DetailRow
-              label={t('Fee Amount')}
-              value={formatLogQuota(other.fee_quota ?? props.log.quota)}
-              mono
-            />
           </DetailSection>
         )}
 
@@ -936,68 +534,6 @@ export function DetailsDialog(props: DetailsDialogProps) {
             )}
           </DetailSection>
         )}
-
-        {props.isAdmin && adminInfo?.task_plugin ? (
-          <DetailSection label={t('Task Plugin')}>
-            <DetailRow
-              label={t('Plugin key')}
-              value={adminInfo.task_plugin.key}
-              mono
-            />
-            <DetailRow label={t('Name')} value={adminInfo.task_plugin.name} />
-            {adminInfo.task_plugin.version ? (
-              <DetailRow
-                label={t('Version')}
-                value={adminInfo.task_plugin.version}
-                mono
-              />
-            ) : null}
-            {adminInfo.task_plugin.author ? (
-              <DetailRow
-                label={t('Plugin author')}
-                value={
-                  <PluginAuthorLink
-                    author={adminInfo.task_plugin.author}
-                    showUrl
-                  />
-                }
-              />
-            ) : null}
-          </DetailSection>
-        ) : null}
-
-        {props.isRoot && other?.root_info ? (
-          <DetailSection label={t('Root Diagnostics')}>
-            {other.root_info.task_plugin ? (
-              <>
-                <DetailRow
-                  label={t('API Version')}
-                  value={String(other.root_info.task_plugin.api_version)}
-                  mono
-                />
-                <DetailRow
-                  label={t('Plugin Generation')}
-                  value={String(other.root_info.task_plugin.generation)}
-                  mono
-                />
-              </>
-            ) : null}
-            {other.root_info.upstream_task_id ? (
-              <DetailRow
-                label={t('Upstream Task ID')}
-                value={other.root_info.upstream_task_id}
-                mono
-              />
-            ) : null}
-            {other.root_info.node_name ? (
-              <DetailRow
-                label={t('Node Name')}
-                value={other.root_info.node_name}
-                mono
-              />
-            ) : null}
-          </DetailSection>
-        ) : null}
 
         {/* Top-up audit info (type=1, admin only) */}
         {showTopupAuditSection && (
@@ -1024,12 +560,6 @@ export function DetailsDialog(props: DetailsDialogProps) {
                 </span>
               </div>
             )}
-          </DetailSection>
-        )}
-
-        {quotaOperation && (
-          <DetailSection label={t('Quota adjustment details')}>
-            <AuditDetailFields fields={quotaOperation.fields} />
           </DetailSection>
         )}
 
@@ -1210,59 +740,19 @@ export function DetailsDialog(props: DetailsDialogProps) {
           <TokenBreakdown log={props.log} other={other} />
         )}
 
-        {/* Billing breakdown (consume type) */}
-        {isConsume && other && !isViolation && (
-          <BillingBreakdown
-            log={props.log}
-            other={other}
-            isAdmin={props.isAdmin}
-          />
-        )}
-
-        {/* Tiered pricing breakdown (when billing_mode is tiered_expr) */}
-        {isTieredBilling && other?.expr_b64 && (
-          <DetailSection label={t('Dynamic Pricing')}>
-            {other.image_count !== undefined && (
+        {/* Usage parameters recorded with the request (non-monetary) */}
+        {usageFacts.length > 0 && (
+          <DetailSection label={t('Usage parameters')}>
+            {usageFacts.map(([key, value]) => (
               <DetailRow
-                label={t('Billable image count')}
-                value={other.image_count}
+                key={`usage-fact-${key}`}
+                label={key}
+                value={String(value)}
+                mono
               />
-            )}
-            <DynamicPricingBreakdown
-              compact
-              billingExpr={decodeBillingExprB64(other.expr_b64)}
-              matchedTierLabel={other.matched_tier}
-              matchedBillingUnit={other.billing_unit}
-              matchedFixedPrice={other.fixed_price}
-              requestRules={other.request_rules}
-              hideCacheColumns={!hasAnyCacheTokens(other)}
-              usageSchema={billingUsageSchema}
-              usageFacts={other.usage_facts}
-            />
+            ))}
           </DetailSection>
         )}
-
-        {/* Admin billing mode indicator for non-consume */}
-        {props.isAdmin &&
-          !isConsume &&
-          props.log.type !== 6 &&
-          other?.admin_info && (
-            <DetailRow
-              label={t('Billing Path')}
-              value={
-                <span className='flex items-center gap-1'>
-                  {isUsageBillingPathLocal(other.admin_info) ? (
-                    <Monitor className='size-3 text-blue-500' />
-                  ) : (
-                    <Cloud className='size-3 text-emerald-500' />
-                  )}
-                  <span className='text-xs'>
-                    {getUsageBillingPathLabel(t, other.admin_info)}
-                  </span>
-                </span>
-              }
-            />
-          )}
 
         {/* Stream status details */}
         {other?.stream_status && other.stream_status.status !== 'ok' && (
@@ -1302,54 +792,6 @@ export function DetailsDialog(props: DetailsDialogProps) {
                   {other.stream_status.errors.join('\n')}
                 </pre>
               )}
-          </DetailSection>
-        )}
-
-        {/* Subscription billing details */}
-        {isSubscription && other && (
-          <DetailSection label={t('Subscription Billing')}>
-            {other.subscription_plan_id && (
-              <DetailRow
-                label={t('Plan')}
-                value={`#${other.subscription_plan_id} ${other.subscription_plan_title || ''}`.trim()}
-              />
-            )}
-            {other.subscription_id && (
-              <DetailRow
-                label={t('Instance')}
-                value={`#${other.subscription_id}`}
-                mono
-              />
-            )}
-            {other.subscription_pre_consumed != null && (
-              <DetailRow
-                label={t('Pre-consumed')}
-                value={formatLogQuota(other.subscription_pre_consumed)}
-                mono
-              />
-            )}
-            {other.subscription_post_delta != null &&
-              other.subscription_post_delta !== 0 && (
-                <DetailRow
-                  label={t('Post Delta')}
-                  value={formatLogQuota(other.subscription_post_delta)}
-                  mono
-                />
-              )}
-            {other.subscription_consumed != null && (
-              <DetailRow
-                label={t('Final Consumed')}
-                value={formatLogQuota(other.subscription_consumed)}
-                mono
-              />
-            )}
-            {other.subscription_remain != null && (
-              <DetailRow
-                label={t('Remaining')}
-                value={`${formatLogQuota(other.subscription_remain)}${other.subscription_total != null ? ` / ${formatLogQuota(other.subscription_total)}` : ''}`}
-                mono
-              />
-            )}
           </DetailSection>
         )}
 

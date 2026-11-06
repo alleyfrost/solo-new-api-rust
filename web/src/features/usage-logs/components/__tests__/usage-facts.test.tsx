@@ -16,27 +16,21 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, within } from '@testing-library/react'
 import i18next from 'i18next'
-import { afterEach, beforeAll, describe, expect, test } from 'vitest'
+import { beforeAll, expect, test } from 'vitest'
 
 import type { UsageLog } from '../../data/schema'
 import type { LogOtherData } from '../../types'
 import { DetailsDialog } from '../dialogs/details-dialog'
 
-const i18nKeys = {
-  'Log Details': 'Log Details',
-  Consume: 'Consume',
-  'Billing Details': 'Billing Details',
-  'Billing Mode': 'Billing Mode',
-  'Per-token': 'Per-token',
-  'Dynamic Pricing': 'Dynamic Pricing',
-  'Matched Tier': 'Matched Tier',
-  'Group Ratio': 'Group Ratio',
-  'Total Cost': 'Total Cost',
-  'Usage parameters': 'Usage parameters',
-}
+beforeAll(() => {
+  // The placeholder-bearing labels must interpolate even when the test
+  // instance carries no full locale bundle.
+  i18next.addResourceBundle('en', 'translation', {
+    'Response model: {{model}}': 'Response model: {{model}}',
+  })
+})
 
 function makeLog(other: LogOtherData): UsageLog {
   return {
@@ -47,8 +41,8 @@ function makeLog(other: LogOtherData): UsageLog {
     content: '',
     username: 'user',
     token_name: 'token',
-    model_name: 'wan2.5-i2v-preview',
-    quota: 5000,
+    model_name: 'gpt-4o-mini',
+    quota: 0,
     prompt_tokens: 0,
     completion_tokens: 0,
     use_time: 0,
@@ -64,30 +58,24 @@ function makeLog(other: LogOtherData): UsageLog {
   }
 }
 
-function renderDetails(other: LogOtherData, promptTokens = 0): QueryClient {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  })
-  const freshAt = Date.now() + 60_000
-  queryClient.setQueryData(['status'], {}, { updatedAt: freshAt })
-  queryClient.setQueryData(
-    ['pricing'],
-    { data: [], vendors: [] },
-    { updatedAt: freshAt }
-  )
-
+function renderDetails(
+  other: LogOtherData,
+  promptTokens = 0,
+  completionTokens = 0
+) {
   render(
-    <QueryClientProvider client={queryClient}>
-      <DetailsDialog
-        log={{ ...makeLog(other), prompt_tokens: promptTokens }}
-        isAdmin={false}
-        isRoot={false}
-        open
-        onOpenChange={() => undefined}
-      />
-    </QueryClientProvider>
+    <DetailsDialog
+      log={{
+        ...makeLog(other),
+        prompt_tokens: promptTokens,
+        completion_tokens: completionTokens,
+      }}
+      isAdmin={false}
+      isRoot={false}
+      open
+      onOpenChange={() => undefined}
+    />
   )
-  return queryClient
 }
 
 function rowValue(label: string): string | null {
@@ -95,7 +83,7 @@ function rowValue(label: string): string | null {
 }
 
 test('shows the recorded request and response models in log details', () => {
-  const queryClient = renderDetails({
+  renderDetails({
     response_model: {
       requested_model: 'requested-model',
       upstream_model: 'mapped-model',
@@ -105,173 +93,99 @@ test('shows the recorded request and response models in log details', () => {
   expect(screen.getByText('Response model: unexpected-model')).toBeVisible()
   expect(rowValue('Request Model')).toBe('requested-model')
   expect(rowValue('Upstream Model')).toBe('mapped-model')
-  expect(screen.getByText('unexpected-model')).toBeVisible()
-  queryClient.clear()
+  const responseModelRow = screen
+    .getAllByText('Response Model')
+    .find((element) => element.tagName === 'SPAN')
+  expect(responseModelRow?.nextElementSibling?.textContent).toContain(
+    'unexpected-model'
+  )
 })
 
-test('splits OpenAI cache writes into 30-minute and 12-hour rows with their prices', () => {
-  const queryClient = renderDetails(
+test('splits OpenAI cache writes into 30-minute and 12-hour token counts', () => {
+  renderDetails(
     {
-      model_ratio: 5,
-      completion_ratio: 4,
-      group_ratio: 1,
       cache_tokens: 2000,
-      cache_ratio: 0.1,
       cache_creation_tokens: 1500,
-      cache_creation_ratio: 1.25,
       cache_creation_tokens_12h: 1000,
-      cache_creation_ratio_12h: 2.5,
     },
     4000
   )
+  expect(rowValue('Cache Read')).toBe('2,000')
   expect(rowValue('Cache Write (30m)')).toBe('500')
   expect(rowValue('Cache Write (12h)')).toBe('1,000')
   expect(screen.queryByText('Cache Write')).toBeNull()
-  expect(rowValue('Cache Creation (30m)')).toBe('$12.5/M')
-  expect(rowValue('Cache Creation (12h)')).toBe('$25/M')
-  queryClient.clear()
+  expect(screen.queryByText(/\$/)).toBeNull()
 })
 
-test('keeps one cache write row and no cache prices for OpenAI logs without 12-hour writes', () => {
-  const queryClient = renderDetails(
+test('keeps one cache write row for logs without 12-hour writes', () => {
+  renderDetails(
     {
-      model_ratio: 5,
-      completion_ratio: 4,
-      group_ratio: 1,
       cache_tokens: 2000,
-      cache_ratio: 0.1,
       cache_creation_tokens: 1500,
-      cache_creation_ratio: 1.25,
     },
     4000
   )
   expect(rowValue('Cache Write')).toBe('1,500')
   expect(screen.queryByText('Cache Write (30m)')).toBeNull()
-  expect(screen.queryByText('Cache Creation (30m)')).toBeNull()
-  expect(screen.queryByText('Cache Creation')).toBeNull()
-  queryClient.clear()
+  expect(screen.queryByText('Cache Write (12h)')).toBeNull()
+  expect(screen.queryByText(/\$/)).toBeNull()
 })
 
-describe('usage facts billing details', () => {
-  test('shows the settled image count and a per-image price', () => {
-    const queryClient = renderDetails({
-      billing_mode: 'tiered_expr',
-      expr_b64: btoa('tier("image", fixed(0.04)) * image_count'),
-      billing_unit: 'request',
-      fixed_price: 0.04,
-      image_count: 2,
-      matched_tier: 'image',
-    })
-    expect(
-      screen.getByText('Billable image count').parentElement
-    ).toHaveTextContent('2')
-    expect(screen.getAllByText(/\/image/).length).toBeGreaterThan(0)
-    queryClient.clear()
-  })
-  const queryClients: QueryClient[] = []
+test('shows input, output and total token counts', () => {
+  renderDetails({}, 4000, 100)
+  expect(rowValue('Input Tokens')).toBe('4,000')
+  expect(rowValue('Output Tokens')).toBe('100')
+  expect(rowValue('Total Tokens')).toBe('4,100')
+})
 
-  test('shows actual billable image and cache tokens while retaining the aggregate cache count', () => {
-    queryClients.push(
-      renderDetails(
-        {
-          billing_mode: 'tiered_expr',
-          expr_b64: btoa(
-            'tier("standard", p * 5 + cr * 1.25 + img * 8 + img_cr * 2 + c * 30)'
-          ),
-          matched_tier: 'standard',
-          cache_tokens: 300,
-          image_cache_tokens: 200,
-          billing_tokens: { p: 300, cr: 100, img: 400, img_cr: 200, c: 100 },
-        },
-        1000
-      )
-    )
-    const billable = within(
-      screen.getByRole('group', { name: 'Billable token breakdown' })
-    )
-    expect(
-      billable.getByText('Image Cache').nextElementSibling
-    ).toHaveTextContent('200')
-    expect(
-      billable.getByText('Cache Read').nextElementSibling
-    ).toHaveTextContent('100')
-    expect(billable.getByText('Image In').nextElementSibling).toHaveTextContent(
-      '400'
-    )
-    expect(
-      screen.getByText('Input Tokens').nextElementSibling
-    ).toHaveTextContent('1,000')
-    expect(
-      screen
-        .getAllByText('Cache Read')
-        .some((label) => label.nextElementSibling?.textContent === '300')
-    ).toBe(true)
+test('shows the recorded billable token breakdown under its raw keys', () => {
+  renderDetails(
+    {
+      cache_tokens: 300,
+      image_cache_tokens: 200,
+      billing_tokens: { p: 300, cr: 100, img: 400, img_cr: 200, c: 100 },
+    },
+    1000
+  )
+  expect(rowValue('Cache Read')).toBe('300')
+  expect(rowValue('Image Cache')).toBe('200')
+  const billable = within(
+    screen.getByRole('group', { name: 'Billable token breakdown' })
+  )
+  expect(billable.getByText('cr').nextElementSibling).toHaveTextContent('100')
+  expect(billable.getByText('img').nextElementSibling).toHaveTextContent('400')
+  expect(billable.getByText('img_cr').nextElementSibling).toHaveTextContent(
+    '200'
+  )
+  expect(screen.queryByText(/\$/)).toBeNull()
+})
+
+test('renders one raw-key row per usage fact in its own section', () => {
+  renderDetails({
+    usage_facts: {
+      resolution: '720P',
+      seconds: 5,
+    },
   })
 
-  beforeAll(() => {
-    i18next.addResourceBundle('en', 'translation', i18nKeys)
-  })
+  expect(screen.getByText('Usage parameters')).toBeInTheDocument()
+  expect(rowValue('resolution')).toBe('720P')
+  expect(rowValue('seconds')).toBe('5')
+  expect(screen.queryByText('Billing Mode')).toBeNull()
+  expect(screen.queryByText('Matched Tier')).toBeNull()
+  expect(screen.queryByText('Total Cost')).toBeNull()
+})
 
-  afterEach(() => {
-    for (const queryClient of queryClients) {
-      queryClient.clear()
-    }
-    queryClients.length = 0
-  })
+test('does not render usage parameter rows when usage_facts is absent', () => {
+  renderDetails({})
 
-  test('renders one raw-key row per usage fact before total cost', () => {
-    const expression = 'tier("720P", u("seconds") * 5)'
-    queryClients.push(
-      renderDetails({
-        group_ratio: 1,
-        billing_mode: 'tiered_expr',
-        expr_b64: Buffer.from(expression, 'utf8').toString('base64'),
-        matched_tier: '720P',
-        usage_facts: {
-          resolution: '720P',
-          seconds: 5,
-        },
-      })
-    )
+  expect(screen.queryByText('Usage parameters')).toBeNull()
+  expect(screen.queryByText('resolution')).toBeNull()
+})
 
-    expect(screen.getByText('Usage parameters')).toBeInTheDocument()
-    expect(rowValue('resolution')).toBe('720P')
-    expect(rowValue('seconds')).toBe('5')
-    expect(rowValue('Billing Mode')).toBe('Dynamic Pricing')
-    expect(rowValue('Matched Tier')).toBe('720P')
+test('does not render usage parameter rows when usage_facts is empty', () => {
+  renderDetails({ usage_facts: {} })
 
-    const usageHeader = screen.getByText('Usage parameters')
-    const totalCost = screen.getByText('Total Cost')
-    expect(
-      usageHeader.compareDocumentPosition(totalCost) &
-        Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy()
-  })
-
-  test('does not render usage parameter rows when usage_facts is absent', () => {
-    queryClients.push(
-      renderDetails({
-        group_ratio: 1,
-      })
-    )
-
-    expect(screen.queryByText('Usage parameters')).toBeNull()
-    expect(screen.queryByText('resolution')).toBeNull()
-    expect(screen.queryByText('seconds')).toBeNull()
-    expect(screen.getByText('Total Cost')).toBeInTheDocument()
-  })
-
-  test('does not render usage parameter rows when usage_facts is empty', () => {
-    queryClients.push(
-      renderDetails({
-        group_ratio: 1,
-        usage_facts: {},
-      })
-    )
-
-    expect(screen.queryByText('Usage parameters')).toBeNull()
-    expect(screen.queryByText('resolution')).toBeNull()
-    expect(screen.queryByText('seconds')).toBeNull()
-    expect(screen.getByText('Total Cost')).toBeInTheDocument()
-  })
+  expect(screen.queryByText('Usage parameters')).toBeNull()
+  expect(screen.queryByText('seconds')).toBeNull()
 })

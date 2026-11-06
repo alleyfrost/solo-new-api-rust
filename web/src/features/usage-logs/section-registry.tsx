@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { createSectionRegistry } from '@/features/system-settings/utils/section-registry'
+import { createSectionRegistry } from '@/lib/section-registry'
 
 /**
  * Usage logs page section definitions
