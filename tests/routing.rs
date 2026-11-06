@@ -26,6 +26,8 @@ fn channel(
         priority: Some(priority),
         weight: Some(weight),
         channel_info: None,
+        model_mapping: None,
+        header_override: None,
     }
 }
 

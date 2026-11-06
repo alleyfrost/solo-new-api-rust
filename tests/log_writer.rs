@@ -2,6 +2,14 @@
 async fn batch_writer_inserts_consume_logs() {
     let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
     sqlx::query("CREATE TABLE logs (id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,created_at INTEGER,type INTEGER,content TEXT,username TEXT,token_name TEXT,model_name TEXT,quota INTEGER,prompt_tokens INTEGER,completion_tokens INTEGER,use_time INTEGER,is_stream NUMERIC,channel_id INTEGER,channel_name TEXT,token_id INTEGER,`group` TEXT,ip TEXT,request_id TEXT,upstream_request_id TEXT,other TEXT)").execute(&pool).await.unwrap();
+    sqlx::query("CREATE TABLE tokens (id INTEGER PRIMARY KEY, accessed_time INTEGER)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO tokens (id, accessed_time) VALUES (2, 0)")
+        .execute(&pool)
+        .await
+        .unwrap();
     let (tx, rx) = solo_new_api_rust::logging::channel(16);
     let writer = solo_new_api_rust::logging::spawn_writer(pool.clone(), rx);
     for i in 0..2 {
@@ -35,4 +43,9 @@ async fn batch_writer_inserts_consume_logs() {
             .await
             .unwrap();
     assert_eq!((count, quota, pt), (2, 0, 20));
+    let accessed: i64 = sqlx::query_scalar("SELECT accessed_time FROM tokens WHERE id = 2")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(accessed, 101);
 }

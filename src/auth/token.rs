@@ -9,6 +9,7 @@ use crate::state::AppState;
 pub struct TokenContext {
     pub user_id: i64,
     pub token_id: i64,
+    pub token_name: String,
     pub token_group: String,
     pub model_limits_enabled: bool,
     pub model_limits: String,
@@ -45,6 +46,7 @@ pub fn validate_token(state: &AppState, key: &str) -> Result<TokenContext, ApiEr
     Ok(TokenContext {
         user_id: token.user_id,
         token_id: token.id,
+        token_name: token.name.clone(),
         token_group: token.group.clone(),
         model_limits_enabled: token.model_limits_enabled,
         model_limits: token.model_limits.clone(),

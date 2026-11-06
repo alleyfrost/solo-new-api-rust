@@ -4,6 +4,7 @@ pub mod db;
 pub mod error;
 pub mod logging;
 pub mod model;
+pub mod relay;
 pub mod retry;
 pub mod routing;
 pub mod routes;

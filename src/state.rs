@@ -21,7 +21,7 @@ impl Caches {
             "SELECT id, user_id, `key`, status, name, expired_time, remain_quota, unlimited_quota, model_limits_enabled, model_limits, allow_ips, `group`, auto_groups, cross_group_retry FROM tokens WHERE deleted_at IS NULL"
         ).fetch_all(pool).await?;
         let channels: Vec<ChannelRow> = sqlx::query_as(
-            "SELECT id, type, `key`, status, name, models, `group`, base_url, priority, weight, channel_info FROM channels"
+            "SELECT id, type, `key`, status, name, models, `group`, base_url, priority, weight, channel_info, model_mapping, header_override FROM channels"
         ).fetch_all(pool).await?;
         let abilities: Vec<AbilityRow> = sqlx::query_as(
             "SELECT `group`, model, channel_id, enabled, priority, weight FROM abilities"

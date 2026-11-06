@@ -43,6 +43,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let relay_routes = axum::Router::new()
         .route("/v1/models", axum::routing::get(routes::models::list_models))
         .route("/v1/models/{model}", axum::routing::get(routes::models::retrieve_model))
+        .route(
+            "/v1/chat/completions",
+            axum::routing::post(solo_new_api_rust::relay::chat::chat_completions),
+        )
+        .layer(axum::extract::DefaultBodyLimit::max(
+            config.max_request_bytes,
+        ))
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
             auth::token::token_auth,

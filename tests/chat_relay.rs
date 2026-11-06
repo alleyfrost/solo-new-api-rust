@@ -1,0 +1,329 @@
+use std::collections::HashMap;
+use std::time::Duration;
+
+use axum::body::{Body, Bytes};
+use axum::http::Request;
+use axum::Router;
+use http_body_util::BodyExt;
+use sqlx::SqlitePool;
+use tower::ServiceExt;
+use wiremock::matchers::{header, method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
+
+use solo_new_api_rust::model::{AbilityRow, ChannelRow, TokenRow, UserRow};
+use solo_new_api_rust::state::{AppState, Caches};
+
+struct Fixture {
+    app: Router,
+    pool: SqlitePool,
+    writer: tokio::task::JoinHandle<()>,
+}
+
+async fn setup(
+    base_url: &str,
+    keys: &str,
+    mapping: Option<&str>,
+    overrides: Option<&str>,
+) -> Fixture {
+    let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+    sqlx::query("CREATE TABLE logs (id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,created_at INTEGER,type INTEGER,content TEXT,username TEXT,token_name TEXT,model_name TEXT,quota INTEGER,prompt_tokens INTEGER,completion_tokens INTEGER,use_time INTEGER,is_stream NUMERIC,channel_id INTEGER,channel_name TEXT,token_id INTEGER,`group` TEXT,ip TEXT,request_id TEXT,upstream_request_id TEXT,other TEXT)").execute(&pool).await.unwrap();
+    sqlx::query("CREATE TABLE tokens (id INTEGER PRIMARY KEY, accessed_time INTEGER)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO tokens (id, accessed_time) VALUES (2, 0)")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let mut caches = Caches {
+        users: HashMap::new(),
+        tokens: HashMap::new(),
+        channels: HashMap::new(),
+        abilities: HashMap::new(),
+        options: HashMap::new(),
+    };
+    caches.users.insert(
+        1,
+        UserRow {
+            id: 1,
+            username: "root".into(),
+            password: "x".into(),
+            display_name: None,
+            role: 100,
+            status: 1,
+            group: "default".into(),
+            auth_version: 1,
+            email: None,
+        },
+    );
+    caches.tokens.insert(
+        "abc123".into(),
+        TokenRow {
+            id: 2,
+            user_id: 1,
+            key: "abc123".into(),
+            status: 1,
+            name: "t".into(),
+            expired_time: -1,
+            remain_quota: 0,
+            unlimited_quota: true,
+            model_limits_enabled: false,
+            model_limits: String::new(),
+            allow_ips: None,
+            group: "default".into(),
+            auto_groups: None,
+            cross_group_retry: false,
+        },
+    );
+    caches.channels.insert(
+        3,
+        ChannelRow {
+            id: 3,
+            r#type: 1,
+            key: keys.into(),
+            status: 1,
+            name: "c".into(),
+            models: "m1".into(),
+            group: "default".into(),
+            base_url: Some(base_url.into()),
+            priority: Some(0),
+            weight: Some(0),
+            channel_info: None,
+            model_mapping: mapping.map(str::to_string),
+            header_override: overrides.map(str::to_string),
+        },
+    );
+    caches
+        .abilities
+        .insert(("default".into(), "m1".into()), vec![AbilityRow {
+            group: "default".into(),
+            model: "m1".into(),
+            channel_id: 3,
+            enabled: true,
+            priority: Some(0),
+            weight: Some(0),
+        }]);
+    caches
+        .options
+        .insert("RetryTimes".into(), "3".into());
+
+    let (tx, rx) = solo_new_api_rust::logging::channel(64);
+    let writer = solo_new_api_rust::logging::spawn_writer(pool.clone(), rx);
+    let cfg = solo_new_api_rust::config::Config {
+        port: 0,
+        db_path: ":memory:".into(),
+        web_dist: "./web/dist".into(),
+        jwt_secret_path: "/tmp/.jwt-test".into(),
+        trust_proxy_headers: true,
+        max_request_bytes: 64 * 1024 * 1024,
+    };
+    let state = AppState::new(cfg, pool.clone(), caches, b"test-secret".to_vec(), Some(tx));
+    let app = Router::new()
+        .route(
+            "/v1/chat/completions",
+            axum::routing::post(solo_new_api_rust::relay::chat::chat_completions),
+        )
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            solo_new_api_rust::auth::token::token_auth,
+        ))
+        .with_state(state);
+    Fixture { app, pool, writer }
+}
+
+async fn send(fixture: Fixture, body: &str) -> (u16, Bytes, SqlitePool) {
+    let Fixture { app, pool, writer } = fixture;
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/chat/completions")
+                .header("authorization", "Bearer sk-abc123")
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = res.status().as_u16();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let _ = tokio::time::timeout(Duration::from_secs(3), writer)
+        .await
+        .expect("log writer should stop after router drop");
+    (status, bytes, pool)
+}
+
+fn ok_json() -> ResponseTemplate {
+    ResponseTemplate::new(200)
+        .insert_header("content-type", "application/json")
+        .set_body_string(
+            r#"{"id":"x","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"hi"}}],"usage":{"prompt_tokens":10,"completion_tokens":5}}"#,
+        )
+}
+
+#[tokio::test]
+async fn non_stream_forwards_and_logs_usage() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .and(header("authorization", "Bearer sk-up"))
+        .respond_with(ok_json())
+        .mount(&server)
+        .await;
+
+    let fixture = setup(&server.uri(), "sk-up", None, None).await;
+    let (status, body, pool) = send(
+        fixture,
+        r#"{"model":"m1","messages":[{"role":"user","content":"hi"}]}"#,
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert!(String::from_utf8_lossy(&body).contains("\"content\":\"hi\""));
+
+    let reqs = server.received_requests().await.unwrap();
+    assert_eq!(reqs.len(), 1);
+    let sent: serde_json::Value = serde_json::from_slice(&reqs[0].body).unwrap();
+    assert_eq!(sent["model"], "m1");
+    assert_eq!(reqs[0].headers["authorization"], "Bearer sk-up");
+
+    let row: (i64, i64, i64, i64, String, i64) = sqlx::query_as(
+        "SELECT COUNT(*), SUM(quota), SUM(prompt_tokens), SUM(completion_tokens), MAX(model_name), MAX(is_stream) FROM logs",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(row, (1, 0, 10, 5, "m1".into(), 0));
+}
+
+#[tokio::test]
+async fn mapping_and_header_override_apply_upstream() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ok_json())
+        .mount(&server)
+        .await;
+
+    let fixture = setup(
+        &server.uri(),
+        "sk-up",
+        Some(r#"{"m1":"up-m1"}"#),
+        Some(r#"{"X-Custom":"v"}"#),
+    )
+    .await;
+    let (status, _, _) = send(fixture, r#"{"model":"m1","messages":[]}"#).await;
+    assert_eq!(status, 200);
+
+    let reqs = server.received_requests().await.unwrap();
+    let sent: serde_json::Value = serde_json::from_slice(&reqs[0].body).unwrap();
+    assert_eq!(sent["model"], "up-m1");
+    assert_eq!(reqs[0].headers["x-custom"], "v");
+}
+
+#[tokio::test]
+async fn rate_limit_rotates_key_and_retries() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(header("authorization", "Bearer k1"))
+        .respond_with(ResponseTemplate::new(429))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(header("authorization", "Bearer k2"))
+        .respond_with(ok_json())
+        .mount(&server)
+        .await;
+
+    let fixture = setup(&server.uri(), "k1\nk2", None, None).await;
+    let (status, _, _) = send(fixture, r#"{"model":"m1","messages":[]}"#).await;
+    assert_eq!(status, 200);
+    let reqs = server.received_requests().await.unwrap();
+    assert_eq!(reqs.len(), 2);
+    assert_eq!(reqs[0].headers["authorization"], "Bearer k1");
+    assert_eq!(reqs[1].headers["authorization"], "Bearer k2");
+}
+
+#[tokio::test]
+async fn client_error_is_not_retried_and_forwarded() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(
+            ResponseTemplate::new(400)
+                .insert_header("content-type", "application/json")
+                .set_body_string(r#"{"error":{"message":"bad request"}}"#),
+        )
+        .mount(&server)
+        .await;
+
+    let fixture = setup(&server.uri(), "sk-up", None, None).await;
+    let (status, body, _) = send(fixture, r#"{"model":"m1","messages":[]}"#).await;
+    assert_eq!(status, 400);
+    assert!(String::from_utf8_lossy(&body).contains("bad request"));
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn stream_tap_hides_usage_and_logs_tokens() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(
+                    "data: {\"id\":\"x\",\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n\
+                     data: {\"id\":\"x\",\"choices\":[],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":3}}\n\n\
+                     data: [DONE]\n\n",
+                ),
+        )
+        .mount(&server)
+        .await;
+
+    let fixture = setup(&server.uri(), "sk-up", None, None).await;
+    let (status, body, pool) = send(
+        fixture,
+        r#"{"model":"m1","messages":[],"stream":true}"#,
+    )
+    .await;
+    assert_eq!(status, 200);
+    let text = String::from_utf8_lossy(&body).to_string();
+    assert!(text.contains("\"content\":\"hi\""));
+    assert!(!text.contains("prompt_tokens"), "未要求 usage 时必须隐藏 usage-only 事件");
+    assert!(text.contains("[DONE]"));
+
+    let reqs = server.received_requests().await.unwrap();
+    let sent: serde_json::Value = serde_json::from_slice(&reqs[0].body).unwrap();
+    assert_eq!(sent["stream_options"]["include_usage"], true);
+
+    let (count, pt, ct, is_stream): (i64, i64, i64, i64) = sqlx::query_as(
+        "SELECT COUNT(*), SUM(prompt_tokens), SUM(completion_tokens), MAX(is_stream) FROM logs",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!((count, pt, ct, is_stream), (1, 2, 3, 1));
+}
+
+#[tokio::test]
+async fn stream_keeps_usage_when_client_requests_it() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(
+                    "data: {\"id\":\"x\",\"choices\":[],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}\n\n\
+                     data: [DONE]\n\n",
+                ),
+        )
+        .mount(&server)
+        .await;
+
+    let fixture = setup(&server.uri(), "sk-up", None, None).await;
+    let (status, body, _) = send(
+        fixture,
+        r#"{"model":"m1","messages":[],"stream":true,"stream_options":{"include_usage":true}}"#,
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert!(String::from_utf8_lossy(&body).contains("prompt_tokens"));
+}

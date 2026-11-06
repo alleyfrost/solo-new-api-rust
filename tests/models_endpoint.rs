@@ -37,6 +37,7 @@ fn caches() -> Caches {
         id: 3, r#type: 1, key: "sk-up".into(), status: 1, name: "c".into(),
         models: "m1,m2,m3".into(), group: "vip".into(), base_url: None,
         priority: None, weight: None, channel_info: Some("{}".into()),
+        model_mapping: None, header_override: None,
     });
     let mut abilities = HashMap::new();
     abilities.insert(("vip".to_string(), "m1".to_string()), vec![ability("vip", "m1", 3, true)]);

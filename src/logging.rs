@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::time::Duration;
 
 use sqlx::SqlitePool;
@@ -70,7 +71,12 @@ async fn flush(pool: &SqlitePool, batch: &mut Vec<LogEntry>) {
             return;
         }
     };
+    let mut touched: HashMap<i64, i64> = HashMap::new();
     for e in batch.drain(..) {
+        touched
+            .entry(e.token_id)
+            .and_modify(|t| *t = (*t).max(e.created_at))
+            .or_insert(e.created_at);
         if let Err(err) = sqlx::query(
             "INSERT INTO logs (user_id,created_at,type,content,username,token_name,model_name,quota,prompt_tokens,completion_tokens,use_time,is_stream,channel_id,channel_name,token_id,`group`,ip,request_id,upstream_request_id,other) \
              VALUES (?,?,2,NULL,?,?,?,0,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -96,6 +102,16 @@ async fn flush(pool: &SqlitePool, batch: &mut Vec<LogEntry>) {
         .await
         {
             tracing::error!("insert log failed: {err}");
+        }
+    }
+    for (token_id, ts) in touched {
+        if let Err(e) = sqlx::query("UPDATE tokens SET accessed_time = ? WHERE id = ?")
+            .bind(ts)
+            .bind(token_id)
+            .execute(&mut *tx)
+            .await
+        {
+            tracing::warn!("update accessed_time failed: {e}");
         }
     }
     if let Err(e) = tx.commit().await {

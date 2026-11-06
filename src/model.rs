@@ -42,6 +42,8 @@ pub struct ChannelRow {
     pub priority: Option<i64>,
     pub weight: Option<i64>,
     pub channel_info: Option<String>,
+    pub model_mapping: Option<String>,
+    pub header_override: Option<String>,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
