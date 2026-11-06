@@ -18,39 +18,16 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import {
-  createMemoryHistory,
-  createRootRoute,
-  createRouter,
-  RouterProvider,
-} from '@tanstack/react-router'
-import {
-  act,
   cleanup,
-  render,
   renderHook,
-  screen,
-  waitFor,
 } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { checkIsActive } from '@/components/layout/lib/url-utils'
-import { invalidateModelPricing } from '@/features/model-pricing/api'
-import {
-  parseSidebarModulesAdmin,
-  serializeSidebarModulesAdmin,
-} from '@/features/system-settings/maintenance/config'
-import {
-  MODEL_PRICING_ISSUES_QUERY_KEY,
-  type ModelPricingIssue,
-} from '@/features/system-settings/models/pricing-issues'
-import { api } from '@/lib/api'
-import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { useSidebarConfig } from '../use-sidebar-config'
 import { useSidebarData } from '../use-sidebar-data'
-import { useSidebarView } from '../use-sidebar-view'
 
 beforeEach(() => {
   vi.stubGlobal('localStorage', {
@@ -87,236 +64,71 @@ function sidebarFor(admin?: object, user?: object, canConfigure = true) {
       </QueryClientProvider>
     )
   }
-  const result = renderHook(
-    () => useSidebarConfig(useSidebarData().navGroups),
-    { wrapper: Wrapper }
-  )
-  return result
+  return renderHook(() => useSidebarConfig(useSidebarData().navGroups), {
+    wrapper: Wrapper,
+  })
 }
 
-describe('security sidebar visibility', () => {
-  it('old configurations show Security & Access immediately after Profile and keep API Keys', () => {
-    const { result } = sidebarFor(
-      { personal: { enabled: true, personal: true, topup: true } },
-      { personal: { enabled: true, personal: true } }
-    )
-    expect(
-      result.current
-        .find((group) => group.id === 'personal')
-        ?.items.map((item) => item.title)
-    ).toEqual(['Wallet', 'Profile', 'Security & Access'])
-    expect(
-      result.current
-        .flatMap((group) => group.items)
-        .some((item) => item.title === 'API Keys')
-    ).toBe(true)
-  })
-  it.each([
-    [{ personal: { enabled: true, security: false } }, undefined],
-    [{ personal: { enabled: false } }, { personal: { security: true } }],
-    [undefined, { personal: { enabled: true, security: false } }],
-    [undefined, { personal: { enabled: false } }],
-  ])(
-    'admin or user disablement hides Security & Access (%j, %j)',
-    (admin, user) => {
-      const { result } = sidebarFor(admin, user)
-      expect(
-        result.current
-          .flatMap((group) => group.items)
-          .some((item) => item.title === 'Security & Access')
-      ).toBe(false)
-    }
-  )
-  it('users without sidebar configuration permission retain the admin view', () => {
-    const { result } = sidebarFor(
-      undefined,
-      { personal: { security: false } },
-      false
-    )
-    expect(
-      result.current
-        .flatMap((group) => group.items)
-        .some((item) => item.title === 'Security & Access')
-    ).toBe(true)
-  })
-})
+function titlesOf(result: { current: ReturnType<typeof useSidebarData>['navGroups'] }) {
+  return result.current.flatMap((group) => group.items).map((item) => item.title)
+}
 
-describe('audit log sidebar entry', () => {
-  it('admin settings default Audit Logs to visible and preserve its independent toggle when saved', () => {
-    const config = parseSidebarModulesAdmin(
-      '{"console":{"enabled":true,"log":true}}'
-    )
-    expect(config.console.audit).toBe(true)
-    config.console.audit = false
-    const saved = parseSidebarModulesAdmin(serializeSidebarModulesAdmin(config))
-    const { result } = sidebarFor(saved)
-    const titles = result.current
-      .flatMap((group) => group.items)
-      .map((item) => item.title)
-    expect(titles).not.toContain('Audit Logs')
+describe('sidebar visibility with current routes', () => {
+  it('shows all product entries by default (empty admin config falls back to defaults)', () => {
+    const { result } = sidebarFor()
+    expect(titlesOf(result)).toEqual([
+      'Overview',
+      'Model Call Analytics',
+      'Playground',
+      'API Keys',
+      'Usage Logs',
+      'Channels',
+      'Models',
+    ])
+  })
+
+  it('legacy configurations missing module keys keep the entries visible', () => {
+    const { result } = sidebarFor({ console: { enabled: true } })
+    const titles = titlesOf(result)
     expect(titles).toContain('Usage Logs')
-  })
-
-  it('legacy configurations show a separate Audit Logs link immediately after Usage Logs', () => {
-    const { result } = sidebarFor(
-      { console: { enabled: true, log: true } },
-      { console: { enabled: true, log: true } }
-    )
-    const items =
-      result.current.find((group) => group.id === 'general')?.items ?? []
-    const usageIndex = items.findIndex((item) => item.title === 'Usage Logs')
-    expect(items[usageIndex + 1]).toMatchObject({
-      title: 'Audit Logs',
-      url: '/usage-logs/audit',
-    })
-    const selected = items.filter((item) =>
-      checkIsActive('/usage-logs/audit', item)
-    )
-    expect(selected.map((item) => item.title)).toEqual(['Audit Logs'])
+    expect(titles).toContain('API Keys')
+    expect(titles).toContain('Playground')
   })
 
   it.each([
-    [{ console: { enabled: true, audit: false } }, undefined],
-    [{ console: { enabled: false } }, { console: { audit: true } }],
-    [undefined, { console: { enabled: true, audit: false } }],
+    [{ console: { enabled: true, log: false } }, undefined],
+    [{ console: { enabled: false } }, { console: { log: true } }],
+    [undefined, { console: { enabled: true, log: false } }],
     [undefined, { console: { enabled: false } }],
   ])(
-    'admin and personal visibility rules can hide Audit Logs (%j, %j)',
+    'admin or user disablement hides Usage Logs (%j, %j)',
     (admin, user) => {
       const { result } = sidebarFor(admin, user)
-      expect(
-        result.current
-          .flatMap((group) => group.items)
-          .some((item) => item.title === 'Audit Logs')
-      ).toBe(false)
+      const titles = titlesOf(result)
+      expect(titles).not.toContain('Usage Logs')
+      // Entries outside the console section are untouched by its toggles.
+      expect(titles).toContain('Playground')
     }
   )
 
-  it('hiding Usage Logs does not hide the independently configured Audit Logs entry', () => {
-    const { result } = sidebarFor({ console: { enabled: true, log: false } })
-    const titles = result.current
-      .flatMap((group) => group.items)
-      .map((item) => item.title)
-    expect(titles).not.toContain('Usage Logs')
-    expect(titles).toContain('Audit Logs')
-  })
-})
-
-describe('model pricing badge', () => {
-  function issue(modelName: string, pluginKey: string): ModelPricingIssue {
-    return {
-      model_name: modelName,
-      plugin_key: pluginKey,
-      plugin_name: pluginKey,
-      reason: 'unconfigured',
-    }
-  }
-
-  /** Lists the sidebar entries of the current view that carry a badge. */
-  function BadgedEntries() {
-    const { navGroups } = useSidebarView()
-    const entries = navGroups
-      .flatMap((group) => group.items)
-      .flatMap((item) => [item, ...(item.items ?? [])])
-      .filter((item) => item.badge)
-    return (
-      <ul aria-label='Badged entries'>
-        {entries.map((item) => (
-          <li key={item.title}>{`${item.title}: ${item.badge}`}</li>
-        ))}
-      </ul>
-    )
-  }
-
-  async function renderSidebar(
-    path: string,
-    role: number,
-    issues: () => ModelPricingIssue[]
-  ) {
-    const get = vi.spyOn(api, 'get').mockImplementation(async (url) => ({
-      data: {
-        success: true,
-        data: url === '/api/option/model_pricing/issues' ? issues() : {},
-      },
-    }))
-    const client = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    })
-    client.setQueryData(['status'], { SidebarModulesAdmin: '' })
-    useAuthStore.getState().auth.setUser({ id: 1, username: 'root', role })
-    const router = createRouter({
-      routeTree: createRootRoute({ component: BadgedEntries }),
-      history: createMemoryHistory({ initialEntries: [path] }),
-    })
-    await router.load()
-    render(
-      <QueryClientProvider client={client}>
-        <RouterProvider router={router} />
-      </QueryClientProvider>
-    )
-    return { client, get }
-  }
-
-  function badgedEntries() {
-    return screen
-      .getByRole('list', { name: 'Badged entries' })
-      .querySelectorAll('li')
-  }
-
-  it('counts each task model once on the System Settings entry of the main sidebar', async () => {
-    await renderSidebar('/dashboard/overview', ROLE.SUPER_ADMIN, () => [
-      issue('kling-v3', 'kling'),
-      issue('shared-video', 'alpha'),
-      issue('shared-video', 'beta'),
-    ])
-
-    expect(await screen.findByText('System Settings: 2')).toBeInTheDocument()
-    expect(badgedEntries()).toHaveLength(1)
+  it('admin section disablement hides Channels and Models for members', () => {
+    const { result } = sidebarFor({ admin: { enabled: false } })
+    const titles = titlesOf(result)
+    expect(titles).not.toContain('Channels')
+    expect(titles).not.toContain('Models')
+    expect(titles).toContain('Overview')
   })
 
-  it('inside System Settings shows the count on Billing & Payment and Model Pricing', async () => {
-    await renderSidebar('/system-settings/site', ROLE.SUPER_ADMIN, () => [
-      issue('kling-v3', 'kling'),
-    ])
-
-    expect(await screen.findByText('Model Pricing: 1')).toBeInTheDocument()
-    expect(screen.getByText('Billing & Payment: 1')).toBeInTheDocument()
-    expect(badgedEntries()).toHaveLength(2)
+  it('playground toggle hides the Playground entry only', () => {
+    const { result } = sidebarFor({ chat: { enabled: true, playground: false } })
+    const titles = titlesOf(result)
+    expect(titles).not.toContain('Playground')
+    expect(titles).toContain('Overview')
+    expect(titles).toContain('API Keys')
   })
 
-  it('follows plugin changes and saved prices without a page reload', async () => {
-    let issues = [issue('kling-v3', 'kling')]
-    const { client } = await renderSidebar(
-      '/dashboard/overview',
-      ROLE.SUPER_ADMIN,
-      () => issues
-    )
-    await screen.findByText('System Settings: 1')
-
-    // A plugin action refreshes the count it may have changed.
-    issues = [issue('kling-v3', 'kling'), issue('vidu-q3', 'vidu')]
-    await act(() =>
-      client.invalidateQueries({ queryKey: MODEL_PRICING_ISSUES_QUERY_KEY })
-    )
-    expect(await screen.findByText('System Settings: 2')).toBeInTheDocument()
-
-    // Every pricing save runs this invalidation.
-    issues = []
-    await act(() => invalidateModelPricing(client))
-    await waitFor(() => expect(badgedEntries()).toHaveLength(0))
-  })
-
-  it('never asks for the count below the super administrator role', async () => {
-    const { get } = await renderSidebar(
-      '/dashboard/overview',
-      ROLE.ADMIN,
-      () => [issue('kling-v3', 'kling')]
-    )
-
-    expect(
-      await screen.findByRole('list', { name: 'Badged entries' })
-    ).toBeInTheDocument()
-    expect(get).not.toHaveBeenCalledWith('/api/option/model_pricing/issues')
-    expect(badgedEntries()).toHaveLength(0)
+  it('users without sidebar configuration permission retain the admin view', () => {
+    const { result } = sidebarFor(undefined, { console: { log: false } }, false)
+    expect(titlesOf(result)).toContain('Usage Logs')
   })
 })

@@ -60,30 +60,3 @@ export class AuthOperationError extends Error {
     )
   }
 }
-
-export const authRequestOptions = {
-  skipBusinessError: true,
-  skipErrorHandler: true,
-}
-
-export async function authResult<T>(
-  request: Promise<{
-    data: { success: boolean; message?: string; code?: string; data?: T }
-  }>,
-  fallback = 'Verification failed. Please try again.'
-): Promise<T> {
-  try {
-    const { data: response } = await request
-    if (!response.success || response.data === undefined) {
-      throw new AuthOperationError(
-        getServerErrorMessageKey(response) ||
-          getServerMessage(response) ||
-          fallback,
-        response.code
-      )
-    }
-    return response.data
-  } catch (error) {
-    throw AuthOperationError.from(error, fallback)
-  }
-}

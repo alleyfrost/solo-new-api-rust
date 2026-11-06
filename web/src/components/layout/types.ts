@@ -55,18 +55,9 @@ export type NavCollapsible = BaseNavItem & {
 }
 
 /**
- * Dynamic chat presets type - dynamically loaded chat preset list from API
- */
-export type NavChatPresets = BaseNavItem & {
-  type: 'chat-presets'
-  url?: never
-  items?: never
-}
-
-/**
  * Navigation item union type
  */
-export type NavItem = NavCollapsible | NavLink | NavChatPresets
+export type NavItem = NavCollapsible | NavLink
 
 /**
  * Navigation group type - a group of navigation items in sidebar
@@ -110,14 +101,6 @@ export type SidebarViewParent = {
 }
 
 /**
- * Counts shown next to sidebar entries, already formatted for display
- */
-export type SidebarBadges = {
-  /** Task models whose price needs attention, on the entries leading to model pricing */
-  modelPricing?: string
-}
-
-/**
  * Nested sidebar view configuration
  *
  * A nested view replaces the root navigation when the user enters a
@@ -132,8 +115,8 @@ export type SidebarView = {
   pathPattern: RegExp
   /** Back-navigation descriptor; required for nested views */
   parent: SidebarViewParent
-  /** Nav group builder, called per render with the active translator and badges */
-  getNavGroups: (t: TFunction, badges: SidebarBadges) => NavGroup[]
+  /** Nav group builder, called per render with the active translator */
+  getNavGroups: (t: TFunction) => NavGroup[]
 }
 
 /**

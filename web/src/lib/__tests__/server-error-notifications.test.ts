@@ -16,20 +16,16 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { CancelledError, QueryClientProvider } from '@tanstack/react-query'
-import { act, renderHook } from '@testing-library/react'
+import { CancelledError } from '@tanstack/react-query'
 import {
   AxiosError,
   AxiosHeaders,
   CanceledError,
   type AxiosAdapter,
 } from 'axios'
-import { createElement, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import { afterEach, expect, it, vi } from 'vitest'
 
-import { saveModelPricing } from '@/features/model-pricing/api'
-import { useUpdateOption } from '@/features/system-settings/hooks/use-update-option'
 import { handleServerError } from '@/lib/handle-server-error'
 import { api } from '@/lib/http-client'
 import { createAppQueryClient } from '@/lib/query-client'
@@ -37,6 +33,7 @@ import { AuthOperationError } from '@/lib/secure-verification'
 import {
   createServerError,
   getServerErrorMessage,
+  requireServerSuccess,
 } from '@/lib/server-error-message'
 import { useAuthStore, type AuthBundle } from '@/stores/auth-store'
 
@@ -68,12 +65,14 @@ it('reports the pricing rejection once when the request error reaches multiple h
     )
   }
   api.defaults.adapter = adapter
-  await saveModelPricing([
-    { model_name: 'example', expected_version: 'v1', pricing: {}, reset: true },
-  ]).catch((error) => {
-    handleServerError(error)
-    handleServerError(error)
-  })
+  await api
+    .patch('/api/option/model_pricing', [
+      { model_name: 'example', expected_version: 'v1', pricing: {}, reset: true },
+    ])
+    .catch((error: unknown) => {
+      handleServerError(error)
+      handleServerError(error)
+    })
   expect(notify.mock.calls.map(([message]) => message)).toEqual([message])
 })
 
@@ -120,7 +119,19 @@ it('uses production mutation callbacks to report nested pricing failures only on
   for (const name of ['first attempt', 'second attempt']) {
     const inner = client
       .getMutationCache()
-      .build(client, { mutationFn: saveModelPricing })
+      .build(client, {
+        mutationFn: async (
+          items: Array<{
+            model_name: string
+            expected_version: string
+            pricing: object
+            reset: boolean
+          }>
+        ) =>
+          requireServerSuccess(
+            (await api.patch('/api/option/model_pricing', items)).data
+          ),
+      })
     const outer = client.getMutationCache().build(client, {
       mutationFn: () =>
         inner.execute([
@@ -426,19 +437,16 @@ it('rejects an unsuccessful setting update so callers cannot proceed as if it sa
     headers: {},
     config,
   })
-  const { result, unmount } = renderHook(() => useUpdateOption(), {
-    wrapper: (props: { children: ReactNode }) =>
-      createElement(QueryClientProvider, { client }, props.children),
+  const mutation = client.getMutationCache().build(client, {
+    mutationFn: async (vars: { key: string; value: string }) =>
+      requireServerSuccess((await api.patch('/api/option', vars)).data),
   })
-  await act(async () => {
-    await expect(
-      result.current.mutateAsync({ key: 'QuotaPerUnit', value: 'invalid' })
-    ).rejects.toThrow('Setting value is invalid')
-  })
+  await expect(
+    mutation.execute({ key: 'QuotaPerUnit', value: 'invalid' })
+  ).rejects.toThrow('Setting value is invalid')
   expect(notify.mock.calls.map(([message]) => message)).toEqual([
     'Setting value is invalid',
   ])
   expect(success).not.toHaveBeenCalled()
-  unmount()
   client.clear()
 })

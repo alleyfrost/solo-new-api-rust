@@ -24,11 +24,8 @@ import {
   getSavedLanguage,
   sanitizeAuthRedirect,
 } from '@/features/auth/lib/auth-redirect'
-import { applyAuthBundle, isAuthBundle } from '@/lib/api'
-import { AuthOperationError } from '@/lib/secure-verification'
+import { applyAuthBundle } from '@/lib/api'
 import { useAuthStore, type AuthBundle } from '@/stores/auth-store'
-
-import { isLoginChallenge } from '../secure-verification/api'
 
 /**
  * Hook for handling authentication redirects and user data management
@@ -71,57 +68,14 @@ export function useAuthRedirect() {
   )
 
   /**
-   * Every primary login transport returns the same bundle-or-challenge contract.
-   */
-  const handleLoginResult = useCallback(
-    async (result: unknown, redirectTo?: string): Promise<boolean> => {
-      if (
-        !mounted.current ||
-        useAuthStore.getState().auth.session?.sid !== sessionID
-      ) {
-        return false
-      }
-      if (isAuthBundle(result)) {
-        await handleLoginSuccess(result, redirectTo)
-        return true
-      }
-      if (!isLoginChallenge(result)) {
-        throw new AuthOperationError('Login failed')
-      }
-      if (result.expires_at * 1000 <= Date.now()) {
-        throw new AuthOperationError(
-          'Login flow expired. Please sign in again.'
-        )
-      }
-      useAuthStore.getState().auth.setPendingLoginVerification({
-        challenge: result,
-        redirectTo:
-          sanitizeAuthRedirect(redirectTo, window.location.origin) ?? undefined,
-      })
-      await navigate({ to: '/otp', replace: true })
-      return false
-    },
-    [handleLoginSuccess, navigate, sessionID]
-  )
-
-  /**
    * Redirect to login page
    */
   const redirectToLogin = useCallback(() => {
     void navigate({ to: '/sign-in', replace: true })
   }, [navigate])
 
-  /**
-   * Redirect to register page
-   */
-  const redirectToRegister = useCallback(() => {
-    void navigate({ to: '/sign-up', replace: true })
-  }, [navigate])
-
   return {
     handleLoginSuccess,
-    handleLoginResult,
     redirectToLogin,
-    redirectToRegister,
   }
 }

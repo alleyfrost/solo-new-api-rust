@@ -19,28 +19,15 @@ For commercial licensing, please contact support@quantumnous.com
 import {
   Activity,
   Box,
-  ClipboardList,
-  CreditCard,
   FileText,
-  FlaskConical,
   Key,
   LayoutDashboard,
-  ListTodo,
-  MessageSquare,
-  PlugZap,
+  MessagesSquare,
   Radio,
-  ServerCog,
-  Settings,
-  ShieldCheck,
-  Ticket,
-  User,
-  Users,
-  Wallet,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import type { SidebarBadges, SidebarData } from '@/components/layout/types'
-import { ROLE } from '@/lib/roles'
+import type { SidebarData } from '@/components/layout/types'
 
 /**
  * Root navigation groups for the application sidebar.
@@ -48,7 +35,7 @@ import { ROLE } from '@/lib/roles'
  * These are shown when the URL does not match any nested sidebar view
  * registered in `layout/lib/sidebar-view-registry.ts`.
  */
-export function useSidebarData(badges: SidebarBadges = {}): SidebarData {
+export function useSidebarData(): SidebarData {
   const { t } = useTranslation()
 
   return {
@@ -66,6 +53,11 @@ export function useSidebarData(badges: SidebarBadges = {}): SidebarData {
             title: t('Model Call Analytics'),
             url: '/dashboard/models',
             icon: LayoutDashboard,
+          },
+          {
+            title: t('Playground'),
+            url: '/playground',
+            icon: MessagesSquare,
           },
           {
             title: t('API Keys'),
