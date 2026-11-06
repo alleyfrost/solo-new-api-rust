@@ -26,6 +26,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/user/auth/logout", axum::routing::post(routes::user::logout));
     let self_route = axum::Router::new()
         .route("/api/user/self", axum::routing::get(routes::user::self_info))
+        .route(
+            "/api/user/self/groups",
+            axum::routing::get(routes::user::self_groups),
+        )
+        .route(
+            "/api/user/models",
+            axum::routing::get(routes::user::user_models),
+        )
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
             auth::admin::admin_auth,
@@ -37,12 +45,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             state.clone(),
             auth::token::token_auth,
         ));
+    let web_dist = config.web_dist.clone();
     let app = axum::Router::new()
         .merge(routes::public_router())
         .merge(login_route)
         .merge(self_route)
         .merge(relay_routes)
-        .with_state(state);
+        .with_state(state)
+        .fallback_service(solo_new_api_rust::web::spa_service(web_dist));
 
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", config.port)).await?;
     tracing::info!("listening on :{}", config.port);

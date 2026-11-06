@@ -76,3 +76,33 @@ pub async fn self_info(State(state): State<AppState>, Extension(ctx): Extension<
         None => ApiError::new(StatusCode::UNAUTHORIZED, "Session expired!").into_response(),
     }
 }
+
+pub async fn self_groups() -> Response {
+    json_ok(&serde_json::json!({
+        "default": { "desc": "默认分组", "ratio": 1 },
+        "vip": { "desc": "VIP 分组", "ratio": 1 }
+    }))
+}
+
+/// Enabled models across abilities whose backing channel is enabled.
+pub async fn user_models(State(state): State<AppState>) -> Response {
+    let caches = state.caches.read().expect("cache lock");
+    let mut models: Vec<String> = caches
+        .abilities
+        .iter()
+        .filter(|(_, rows)| {
+            rows.iter().any(|a| {
+                a.enabled
+                    && caches
+                        .channels
+                        .get(&a.channel_id)
+                        .map(|c| c.status == 1)
+                        .unwrap_or(false)
+            })
+        })
+        .map(|((_, model), _)| model.clone())
+        .collect();
+    models.sort();
+    models.dedup();
+    json_ok(&models)
+}
