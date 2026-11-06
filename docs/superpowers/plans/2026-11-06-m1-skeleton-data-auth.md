@@ -46,7 +46,7 @@
 ## Task 1: Cargo 骨架与 /api/status
 
 **Files:**
-- Create: `rust-toolchain.toml`, `Cargo.toml`, `src/main.rs`, `src/config.rs`, `src/routes/mod.rs`, `src/routes/status.rs`, `src/error.rs`
+- Create: `rust-toolchain.toml`, `Cargo.toml`, `src/lib.rs`, `src/main.rs`, `src/config.rs`, `src/state.rs`, `src/routes/mod.rs`, `src/routes/status.rs`, `src/error.rs`
 - Test: `tests/integration_m1.rs`
 
 **Interfaces:**
@@ -209,36 +209,55 @@ pub fn public_router() -> Router<AppState> {
 }
 ```
 
-- [ ] **Step 7: 写 `src/main.rs`**
+- [ ] **Step 7: 写 `src/lib.rs` 与 `src/main.rs`**
+
+`src/lib.rs`：
 
 ```rust
-mod config;
-mod error;
-mod routes;
-mod state;
+pub mod config;
+pub mod error;
+pub mod routes;
+pub mod state;
 
-use std::sync::Arc;
-use tokio::net::TcpListener;
+pub const START_TIME: i64 = 0; // Task 8 替换为 OnceLock
+```
 
-pub static START_TIME: i64 = 0; // 占位，启动时设置见 Task 8
+`src/main.rs`：
+
+```rust
+use solo_new_api_rust::{config, routes, state};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::from_default_env()).init();
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
     let config = config::Config::from_env();
     let state = state::AppState {
         config: config.clone(),
         pool: sqlx::SqlitePool::connect(&format!("sqlite://{}?mode=rwc", config.db_path.display())).await?,
     };
     let app = routes::public_router().with_state(state);
-    let listener = TcpListener::bind(format!("0.0.0.0:{}", config.port)).await?;
+    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", config.port)).await?;
     tracing::info!("listening on :{}", config.port);
     axum::serve(listener, app).await?;
     Ok(())
 }
 ```
 
-注：Task 2 会替换连接逻辑为 `db::connect` 并加入 schema 校验；Task 8 完善 `START_TIME` 与优雅停机。此处先让 `/api/status` 可跑。
+注：Task 2 会替换连接逻辑为 `db::connect` 并加入 schema 校验；Task 8 完善 `START_TIME` 与优雅停机。
+
+- [ ] **Step 7b: 写 `src/state.rs` 最小版**
+
+```rust
+use crate::config::Config;
+
+#[derive(Clone)]
+pub struct AppState {
+    pub config: Config,
+    pub pool: sqlx::SqlitePool,
+}
+```
 
 - [ ] **Step 8: 写失败集成测试 `tests/integration_m1.rs`**
 
@@ -271,29 +290,12 @@ async fn status_returns_success() {
 }
 ```
 
-- [ ] **Step 9: 运行测试确认失败**
-
-Run: `cargo test --test integration_m1`
-Expected: 编译失败（`state::AppState` 字段不完整/未导出）。先补最小 `src/state.rs`：
-
-```rust
-use crate::config::Config;
-
-#[derive(Clone)]
-pub struct AppState {
-    pub config: Config,
-    pub pool: sqlx::SqlitePool,
-}
-```
-
-并在 `main.rs`/`routes/mod.rs` 导出 `pub mod config; pub mod state; pub mod routes;`（模块改为 `pub`）。再次运行测试直到通过。
-
-- [ ] **Step 10: 运行测试确认通过**
+- [ ] **Step 9: 运行测试**
 
 Run: `cargo test --test integration_m1`
 Expected: PASS。
 
-- [ ] **Step 11: 提交**
+- [ ] **Step 10: 提交**
 
 ```bash
 git add rust-toolchain.toml Cargo.toml src tests
@@ -1162,3 +1164,542 @@ Expected: PASS。
 git add Cargo.toml src tests
 git commit -m "feat(m1): admin login with JWT and session"
 ```
+
+---
+
+## Task 5b: 会话刷新与登出
+
+**Files:**
+- Modify: `src/auth/session.rs`, `src/routes/user.rs`, `src/main.rs`
+- Test: `tests/admin_refresh.rs`
+
+**Interfaces:**
+- Produces: `session::parse_refresh_cookie(&HeaderMap) -> Option<(String, String)>`（sid, secret）；`session::refresh_session(&SqlitePool, &Caches, sid, secret, jwt_secret) -> Result<(AuthBundle, String), ApiError>`；`routes::user::{refresh, logout}`。
+
+- [ ] **Step 1: `session.rs` 增加 cookie 解析与刷新**
+
+```rust
+use axum::http::HeaderMap;
+
+pub fn parse_refresh_cookie(headers: &HeaderMap) -> Option<(String, String)> {
+    let cookie = headers.get("cookie")?.to_str().ok()?;
+    let value = cookie.split(';')
+        .find_map(|part| part.trim().strip_prefix("new_api_refresh="))?;
+    let (sid, secret) = value.split_once('.')?;
+    Some((sid.to_string(), secret.to_string()))
+}
+
+pub async fn refresh_session(
+    pool: &sqlx::SqlitePool,
+    caches: &crate::state::Caches,
+    sid: &str,
+    secret: &str,
+    jwt_secret: &[u8],
+) -> Result<(AuthBundle, String), ApiError> {
+    let row: Option<(i64, i64, i64, String, String, Option<String>, i64, String, String, String, i64, i64, i64)> =
+        sqlx::query_as(
+            "SELECT user_id, version, user_auth_version, status, refresh_hash, previous_refresh_hash, \
+             previous_valid_until, login_method, ip, user_agent, created_at, last_active_at, expires_at \
+             FROM user_sessions WHERE sid=?"
+        ).bind(sid).fetch_optional(pool).await
+        .map_err(|e| ApiError::new(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let Some((user_id, version, uver, status, refresh_hash, prev_hash, prev_until, method, ip, ua, created, _last, expires)) = row else {
+        return Err(ApiError::new(axum::http::StatusCode::UNAUTHORIZED, "Session expired!"));
+    };
+    if status != "active" || expires <= now() {
+        return Err(ApiError::new(axum::http::StatusCode::UNAUTHORIZED, "Session expired!"));
+    }
+    let presented = sha256_hex(secret.as_bytes());
+    let valid = presented == refresh_hash
+        || (prev_until > now() && prev_hash.as_deref() == Some(presented.as_str()));
+    if !valid {
+        return Err(ApiError::new(axum::http::StatusCode::UNAUTHORIZED, "Session expired!"));
+    }
+    use rand::RngCore;
+    let mut next = vec![0u8; 32];
+    rand::thread_rng().fill_bytes(&mut next);
+    let next_plain = hex::encode(&next);
+    let active = now();
+    sqlx::query(
+        "UPDATE user_sessions SET refresh_hash=?, previous_refresh_hash=?, previous_valid_until=?, last_active_at=? WHERE sid=?"
+    )
+    .bind(sha256_hex(next_plain.as_bytes())).bind(&refresh_hash)
+    .bind(active + 60).bind(active).bind(sid)
+    .execute(pool).await
+    .map_err(|e| ApiError::new(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let user = caches.users.get(&user_id)
+        .ok_or_else(|| ApiError::new(axum::http::StatusCode::UNAUTHORIZED, "Session expired!"))?;
+    let access_exp = active + 15 * 60;
+    let claims = Claims { sub: user_id, sid: sid.to_string(), ver: version, uver, iat: active, exp: access_exp };
+    let access_token = issue_access(&claims, jwt_secret)?;
+    let bundle = AuthBundle {
+        access_token,
+        token_type: "Bearer",
+        access_expires_at: access_exp,
+        user: user_json(user),
+        session: SessionView {
+            sid: sid.to_string(), current: true, login_method: method,
+            ip, user_agent: ua, created_at: created, last_active_at: active, expires_at: expires,
+        },
+    };
+    Ok((bundle, next_plain))
+}
+```
+
+- [ ] **Step 2: `routes/user.rs` 增加刷新与登出**
+
+```rust
+pub async fn refresh(State(state): State<AppState>, headers: HeaderMap) -> Result<Response, ApiError> {
+    let (sid, secret) = session::parse_refresh_cookie(&headers)
+        .ok_or_else(|| ApiError::new(StatusCode::UNAUTHORIZED, "Session expired!"))?;
+    let (bundle, next_plain) = {
+        let caches = state.caches.read().expect("cache lock");
+        session::refresh_session(&state.pool, &caches, &sid, &secret, &state.jwt_secret).await?
+    };
+    let mut response = json_ok(&bundle);
+    response.headers_mut().insert("set-cookie", set_cookie(&sid, &next_plain).parse().unwrap());
+    Ok(response)
+}
+
+pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let sid = session::parse_refresh_cookie(&headers).map(|(sid, _)| sid)
+        .or_else(|| headers.get("x-auth-session").and_then(|v| v.to_str().ok()).map(|v| v.to_string()));
+    if let Some(sid) = sid {
+        let _ = sqlx::query("UPDATE user_sessions SET status='revoked', revoked_at=?, revoked_reason='logout' WHERE sid=?")
+            .bind(session::now()).bind(&sid).execute(&state.pool).await;
+    }
+    let mut response = json_ok(&serde_json::json!({}));
+    response.headers_mut().insert("set-cookie",
+        "new_api_refresh=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0".parse().unwrap());
+    response
+}
+```
+
+- [ ] **Step 3: 注册路由**
+
+在 `main.rs` 的 `login_route` 上追加：
+
+```rust
+.route("/api/user/auth/refresh", axum::routing::post(routes::user::refresh))
+.route("/api/user/auth/logout", axum::routing::post(routes::user::logout))
+```
+
+- [ ] **Step 4: 写测试 `tests/admin_refresh.rs`**
+
+复用 Task 5a 的测试夹具构造，登录后：
+
+```rust
+let cookie = res.headers().get("set-cookie").unwrap().to_str().unwrap()
+    .split(';').next().unwrap().to_string();
+
+let res = app.clone().oneshot(Request::builder().method("POST").uri("/api/user/auth/refresh")
+    .header("cookie", cookie.clone()).body(Body::empty()).unwrap()).await.unwrap();
+assert_eq!(res.status(), 200);
+let body = res.into_body().collect().await.unwrap().to_bytes();
+let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+let token2 = v["data"]["access_token"].as_str().unwrap().to_string();
+assert_ne!(token2, token);
+
+let res = app.clone().oneshot(Request::builder().method("POST").uri("/api/user/auth/logout")
+    .header("cookie", cookie).body(Body::empty()).unwrap()).await.unwrap();
+assert_eq!(res.status(), 200);
+
+let res = app.oneshot(Request::builder().uri("/api/user/self")
+    .header("authorization", format!("Bearer {token2}"))
+    .body(Body::empty()).unwrap()).await.unwrap();
+assert_eq!(res.status(), 401);
+```
+
+- [ ] **Step 5: 运行测试**
+
+Run: `cargo test --test admin_refresh`
+Expected: PASS。
+
+- [ ] **Step 6: 提交**
+
+```bash
+git add src tests
+git commit -m "feat(m1): session refresh and logout"
+```
+
+---
+
+## Task 6: /v1/models 与模型聚合
+
+**Files:**
+- Create: `src/routes/models.rs`
+- Modify: `src/auth/token.rs`（`TokenContext` 增加模型限制字段）、`src/routes/mod.rs`、`src/main.rs`
+- Test: `tests/models_endpoint.rs`
+
+**Interfaces:**
+- Produces: `routes::models::{list_models, retrieve_model}`；`TokenContext { user_id, token_id, token_group, model_limits_enabled: bool, model_limits: String }`；`models::available_models(&Caches, &TokenContext) -> Vec<String>`。
+
+- [ ] **Step 1: 扩展 `TokenContext`**
+
+`src/auth/token.rs` 结构体与构造：
+
+```rust
+pub struct TokenContext {
+    pub user_id: i64,
+    pub token_id: i64,
+    pub token_group: String,
+    pub model_limits_enabled: bool,
+    pub model_limits: String,
+}
+// validate_token 末尾：
+Ok(TokenContext {
+    user_id: token.user_id, token_id: token.id, token_group: token.group.clone(),
+    model_limits_enabled: token.model_limits_enabled,
+    model_limits: token.model_limits.clone(),
+})
+```
+
+- [ ] **Step 2: 写 `src/routes/models.rs`**
+
+```rust
+use axum::extract::{Extension, Path, State};
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::Response;
+use serde_json::json;
+use crate::auth::token::TokenContext;
+use crate::error::{json_ok, ApiError};
+use crate::state::{AppState, Caches};
+
+pub fn available_models(caches: &Caches, ctx: &TokenContext) -> Vec<String> {
+    let mut models: Vec<String> = caches.abilities.iter()
+        .filter(|((group, _), _)| group == &ctx.token_group)
+        .filter(|((_, _), rows)| rows.iter().any(|a| a.enabled))
+        .filter(|((_, _), rows)| rows.iter().any(|a| {
+            caches.channels.get(&a.channel_id).map(|c| c.status == 1).unwrap_or(false)
+        }))
+        .map(|((_, model), _)| model.clone())
+        .collect();
+    models.sort();
+    models.dedup();
+    if ctx.model_limits_enabled {
+        let allowed: std::collections::HashSet<&str> = ctx.model_limits.split(',').map(str::trim).collect();
+        models.retain(|m| allowed.contains(m.as_str()));
+    }
+    models
+}
+
+fn wants_anthropic(headers: &HeaderMap) -> bool {
+    headers.contains_key("anthropic-version") || headers.contains_key("x-api-key")
+}
+
+pub async fn list_models(State(state): State<AppState>, Extension(ctx): Extension<TokenContext>, headers: HeaderMap) -> Response {
+    let caches = state.caches.read().expect("cache lock");
+    let models = available_models(&caches, &ctx);
+    if wants_anthropic(&headers) {
+        let data: Vec<serde_json::Value> = models.iter().map(|m| json!({
+            "type": "model", "id": m, "display_name": m, "created_at": "1970-01-01T00:00:00Z"
+        })).collect();
+        return json_ok(&json!({
+            "data": data, "has_more": false,
+            "first_id": models.first(), "last_id": models.last()
+        }));
+    }
+    let data: Vec<serde_json::Value> = models.iter().map(|m| json!({
+        "id": m, "object": "model", "created": 0, "owned_by": "system"
+    })).collect();
+    json_ok(&json!({ "object": "list", "data": data }))
+}
+
+pub async fn retrieve_model(State(state): State<AppState>, Extension(ctx): Extension<TokenContext>, Path(model): Path<String>) -> Result<Response, ApiError> {
+    let caches = state.caches.read().expect("cache lock");
+    let models = available_models(&caches, &ctx);
+    if models.iter().any(|m| m == &model) {
+        Ok(json_ok(&json!({ "id": model, "object": "model", "created": 0, "owned_by": "system" })))
+    } else {
+        Err(ApiError::new(StatusCode::NOT_FOUND, "model not found"))
+    }
+}
+```
+
+- [ ] **Step 3: 装配路由**
+
+`src/routes/mod.rs` 增加 `pub mod models;`。在 `main.rs`：
+
+```rust
+let relay_routes = Router::new()
+    .route("/v1/models", axum::routing::get(routes::models::list_models))
+    .route("/v1/models/{model}", axum::routing::get(routes::models::retrieve_model))
+    .route_layer(axum::middleware::from_fn_with_state(state.clone(), auth::token::token_auth));
+let app = Router::new()
+    .merge(routes::public_router())
+    .merge(login_route)
+    .merge(self_route)
+    .merge(relay_routes)
+    .with_state(state);
+```
+
+- [ ] **Step 4: 写测试 `tests/models_endpoint.rs`**
+
+构造 caches：token `vip`，channel 3 status=1，abilities `vip:m1`、`vip:m2`、`default:m3`。断言：
+
+```rust
+// GET /v1/models  Bearer sk-abc123
+let v: serde_json::Value = ...;
+let ids: Vec<&str> = v["data"].iter().map(|m| m["id"].as_str().unwrap()).collect();
+assert_eq!(ids, vec!["m1", "m2"]);
+
+// Anthropic 头
+// header("anthropic-version","2023-06-01").header("x-api-key","sk-abc123")
+assert_eq!(v["data"][0]["type"], "model");
+assert_eq!(v["has_more"], false);
+```
+
+再增加一个 `model_limits_enabled=true, model_limits="m2"` 的 token，断言只返回 `m2`。
+
+- [ ] **Step 5: 运行测试**
+
+Run: `cargo test --test models_endpoint`
+Expected: PASS。
+
+- [ ] **Step 6: 提交**
+
+```bash
+git add src tests
+git commit -m "feat(m1): /v1/models with group and token limits"
+```
+
+---
+
+## Task 7: 静态前端与用户信息接口
+
+**Files:**
+- Create: `src/web.rs`
+- Modify: `src/routes/user.rs`、`src/routes/mod.rs`、`src/main.rs`
+- Test: `tests/static_web.rs`
+
+**Interfaces:**
+- Produces: `web::spa_service(dist: PathBuf) -> Router`（未匹配路径回退 `index.html`）；`routes::user::self_groups`、`routes::user::user_models`。
+
+- [ ] **Step 1: 写 `src/web.rs`**
+
+```rust
+use std::path::PathBuf;
+use axum::Router;
+use tower_http::services::{ServeDir, ServeFile};
+
+pub fn spa_service(dist: PathBuf) -> Router {
+    let index = dist.join("index.html");
+    Router::new().fallback_service(
+        ServeDir::new(&dist).not_found_service(ServeFile::new(index))
+    )
+}
+```
+
+- [ ] **Step 2: 增加用户信息接口**
+
+`src/routes/user.rs`：
+
+```rust
+pub async fn self_groups() -> Response {
+    json_ok(&serde_json::json!({
+        "default": { "desc": "默认分组", "ratio": 1 },
+        "vip": { "desc": "VIP 分组", "ratio": 1 }
+    }))
+}
+
+pub async fn user_models(State(state): State<AppState>) -> Response {
+    let caches = state.caches.read().expect("cache lock");
+    let mut models: Vec<String> = caches.abilities.iter()
+        .filter(|(_, rows)| rows.iter().any(|a| a.enabled))
+        .filter(|(_, rows)| rows.iter().any(|a| {
+            caches.channels.get(&a.channel_id).map(|c| c.status == 1).unwrap_or(false)
+        }))
+        .map(|((_, model), _)| model.clone())
+        .collect();
+    models.sort();
+    models.dedup();
+    json_ok(&models)
+}
+```
+
+- [ ] **Step 3: 注册**
+
+`main.rs` 的 `self_route` 追加（仍在 admin 中间件下）：
+
+```rust
+.route("/api/user/self/groups", axum::routing::get(routes::user::self_groups))
+.route("/api/user/models", axum::routing::get(routes::user::user_models))
+```
+
+最后作为兜底服务（放在所有 API 路由之后）：
+
+```rust
+let app = app.fallback_service(web::spa_service(config.web_dist.clone()));
+```
+
+并在 `main.rs` 增加 `mod web;`（或使用 `solo_new_api_rust::web`）。
+
+- [ ] **Step 4: 写测试 `tests/static_web.rs`**
+
+```rust
+#[tokio::test]
+async fn serves_index_for_spa_routes() {
+    let dir = std::env::temp_dir().join(format!("spa-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("index.html"), "<html>ok</html>").unwrap();
+    let app = solo_new_api_rust::web::spa_service(dir.clone());
+    let res = app.oneshot(axum::http::Request::builder().uri("/keys")
+        .body(axum::body::Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(res.status(), 200);
+    let body = http_body_util::BodyExt::collect(res.into_body()).await.unwrap().to_bytes();
+    assert!(String::from_utf8_lossy(&body).contains("ok"));
+    std::fs::remove_dir_all(dir).ok();
+}
+```
+
+（需要 `use tower::ServiceExt;`）
+
+- [ ] **Step 5: 运行测试**
+
+Run: `cargo test --test static_web`
+Expected: PASS。
+
+- [ ] **Step 6: 提交**
+
+```bash
+git add src tests
+git commit -m "feat(m1): spa static serving and user info endpoints"
+```
+
+---
+
+## Task 8: 优雅停机与真实库兼容验收
+
+**Files:**
+- Modify: `src/main.rs`、`src/routes/status.rs`
+- Create: `tests/real_db.rs`
+- Test: `tests/real_db.rs`（默认忽略，需 `REAL_DB` 环境变量）
+
+**Interfaces:**
+- Produces: `START_TIME: OnceLock<i64>`；`main` 支持 SIGINT/SIGTERM 优雅停机；真实库冒烟测试可手动执行。
+
+- [ ] **Step 1: 启动时间改为 OnceLock**
+
+`src/lib.rs` 或 `src/main.rs`：
+
+```rust
+pub static START_TIME: std::sync::OnceLock<i64> = std::sync::OnceLock::new();
+```
+
+`main` 开头：
+
+```rust
+let start = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+START_TIME.set(start).ok();
+```
+
+`status.rs` 中 `"start_time": crate::START_TIME` 改为：
+
+```rust
+"start_time": crate::START_TIME.get().copied().unwrap_or(0),
+```
+
+- [ ] **Step 2: 优雅停机**
+
+```rust
+async fn shutdown_signal() {
+    let ctrl_c = async { tokio::signal::ctrl_c().await.ok(); };
+    #[cfg(unix)]
+    let term = async {
+        use tokio::signal::unix::{signal, SignalKind};
+        signal(SignalKind::terminate()).unwrap().recv().await;
+    };
+    #[cfg(not(unix))]
+    let term = std::future::pending::<()>();
+    tokio::select! { _ = ctrl_c => {}, _ = term => {} }
+    tracing::info!("shutdown signal received");
+}
+```
+
+`main` 启动：
+
+```rust
+axum::serve(listener, app)
+    .with_graceful_shutdown(shutdown_signal())
+    .await?;
+```
+
+- [ ] **Step 3: 写真实库测试 `tests/real_db.rs`**
+
+```rust
+use axum::body::Body;
+use axum::http::Request;
+use http_body_util::BodyExt;
+use std::sync::{Arc, RwLock};
+use tower::ServiceExt;
+
+#[tokio::test]
+#[ignore = "requires REAL_DB pointing at a copy of one-api.db"]
+async fn real_db_schema_caches_and_token_models() {
+    let path = std::env::var("REAL_DB").expect("REAL_DB");
+    let pool = solo_new_api_rust::db::connect(std::path::Path::new(&path)).await.unwrap();
+    solo_new_api_rust::db::validate_schema(&pool).await.unwrap();
+
+    let caches = solo_new_api_rust::state::Caches::load(&pool).await.unwrap();
+    assert!(!caches.users.is_empty());
+    assert!(!caches.tokens.is_empty());
+    assert!(!caches.channels.is_empty());
+
+    let (key, user) = {
+        let token = caches.tokens.values().find(|t| t.status == 1).expect("enabled token");
+        let user = caches.users.get(&token.user_id).expect("token user");
+        (token.key.clone(), user.clone())
+    };
+    assert_eq!(user.status, 1);
+
+    let cfg = solo_new_api_rust::config::Config {
+        port: 0, db_path: path.into(), web_dist: "./web/dist".into(),
+        jwt_secret_path: "/tmp/.jwt-test".into(), trust_proxy_headers: true,
+        max_request_bytes: 64 * 1024 * 1024,
+    };
+    let state = solo_new_api_rust::state::AppState {
+        config: cfg, pool: pool.clone(), caches: Arc::new(RwLock::new(caches)),
+        jwt_secret: Arc::new(b"test-secret".to_vec()),
+    };
+    let app = axum::Router::new()
+        .route("/v1/models", axum::routing::get(solo_new_api_rust::routes::models::list_models))
+        .layer(axum::middleware::from_fn_with_state(state.clone(), solo_new_api_rust::auth::token::token_auth))
+        .with_state(state);
+
+    let res = app.oneshot(Request::builder().uri("/v1/models")
+        .header("authorization", format!("Bearer sk-{key}"))
+        .body(Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(res.status(), 200);
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(!v["data"].as_array().unwrap().is_empty());
+
+    let integrity: String = sqlx::query_scalar("PRAGMA integrity_check").fetch_one(&pool).await.unwrap();
+    assert_eq!(integrity, "ok");
+}
+```
+
+- [ ] **Step 4: 运行默认测试与真实库测试**
+
+Run: `cargo test`
+Expected: 默认测试全绿，`real_db` ignored。
+
+Run: `REAL_DB=data/one-api.db cargo test --test real_db -- --ignored`
+Expected: PASS（要求 `data/one-api.db` 存在且可读；测试只读）。
+
+- [ ] **Step 5: 提交**
+
+```bash
+git add src tests
+git commit -m "feat(m1): graceful shutdown and real-db compatibility test"
+```
+
+---
+
+## M1 完成标准
+
+- `cargo test` 全绿；`REAL_DB=data/one-api.db cargo test --test real_db -- --ignored` 通过。
+- 启动真实库副本：`DB_PATH=data/one-api.db cargo run`，`curl /api/status` 返回 `success:true`。
+- 用真实启用 Token 调 `/v1/models` 返回渠道模型，不修改数据库结构。
+- 管理登录/刷新/登出可用（需知道 root 密码）。
