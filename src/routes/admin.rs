@@ -8,6 +8,7 @@ pub mod data;
 pub mod log;
 pub mod misc;
 pub mod models;
+pub mod option;
 pub mod token;
 pub mod user;
 
@@ -19,6 +20,7 @@ pub fn router() -> Router<AppState> {
         .merge(log::router())
         .merge(data::router())
         .merge(models::router())
+        .merge(option::router())
         .merge(misc::router())
         .merge(user::router())
 }

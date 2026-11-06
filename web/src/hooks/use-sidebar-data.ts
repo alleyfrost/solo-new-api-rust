@@ -24,6 +24,7 @@ import {
   LayoutDashboard,
   MessagesSquare,
   Radio,
+  Settings2,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
@@ -84,6 +85,11 @@ export function useSidebarData(): SidebarData {
             title: t('Models'),
             url: '/models/metadata',
             icon: Box,
+          },
+          {
+            title: t('System Settings'),
+            url: '/settings',
+            icon: Settings2,
           },
         ],
       },

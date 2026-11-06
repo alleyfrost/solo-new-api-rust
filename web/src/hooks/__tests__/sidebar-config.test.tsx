@@ -84,6 +84,7 @@ describe('sidebar visibility with current routes', () => {
       'Usage Logs',
       'Channels',
       'Models',
+      'System Settings',
     ])
   })
 
@@ -117,6 +118,8 @@ describe('sidebar visibility with current routes', () => {
     expect(titles).not.toContain('Channels')
     expect(titles).not.toContain('Models')
     expect(titles).toContain('Overview')
+    // Unmapped URLs fall back to visible, so settings is never locked away.
+    expect(titles).toContain('System Settings')
   })
 
   it('playground toggle hides the Playground entry only', () => {

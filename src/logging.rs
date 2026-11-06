@@ -120,6 +120,12 @@ async fn flush(pool: &SqlitePool, batch: &mut Vec<LogEntry>) {
 }
 
 pub async fn enqueue(state: &crate::state::AppState, entry: LogEntry) {
+    // 所有 LogEntry 都是消费日志（type=2），关掉开关就等于不落库；
+    // 令牌 accessed_time 随日志批一起更新，所以这里也一并停更。
+    let settings = crate::settings::Settings::load(state).await;
+    if !settings.log_consume_enabled {
+        return;
+    }
     let Some(tx) = &state.log_tx else {
         return;
     };

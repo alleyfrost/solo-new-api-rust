@@ -1,14 +1,20 @@
 use crate::error::json_ok;
+use crate::settings::Settings;
 use crate::state::AppState;
 use axum::extract::State;
 use axum::response::Response;
 use serde_json::json;
 
-pub async fn get_status() -> Response {
+pub const DEFAULT_SYSTEM_NAME: &str = "solo-new-api";
+
+pub async fn get_status(State(state): State<AppState>) -> Response {
+    let settings = Settings::load(&state).await;
     let data = json!({
         "version": env!("CARGO_PKG_VERSION"),
         "start_time": crate::START_TIME.get().copied().unwrap_or(0),
-        "system_name": "solo-new-api",
+        "system_name": settings.system_name,
+        "logo": settings.logo,
+        "server_address": settings.server_address,
         "self_use_mode_enabled": true,
         "password_login_enabled": true,
         "password_login_encryption_enabled": false,
@@ -18,8 +24,8 @@ pub async fn get_status() -> Response {
         "register_enabled": false,
         "password_register_enabled": false,
         // 导出开关与最长跨度要和 /api/log/export 的服务端校验一致，否则前端选得出、后端拒得了。
-        "log_export_enabled": true,
-        "log_max_range_days": crate::routes::admin::log::MAX_EXPORT_DAYS,
+        "log_export_enabled": settings.log_export_enabled,
+        "log_max_range_days": settings.log_max_range_days,
         "HeaderNavModules": {
             "home": false,
             "console": true,
@@ -40,8 +46,8 @@ pub async fn get_setup() -> Response {
     }))
 }
 
-pub async fn get_notice() -> Response {
-    json_ok(&"")
+pub async fn get_notice(State(state): State<AppState>) -> Response {
+    json_ok(&Settings::load(&state).await.notice)
 }
 
 pub async fn get_group(State(state): State<AppState>) -> Response {

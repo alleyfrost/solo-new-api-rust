@@ -102,6 +102,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/log/self/export", get(export_self))
         .route("/api/log/stat", get(stat))
         .route("/api/log/self/stat", get(stat_self))
+        .route("/api/log/cleanup", axum::routing::delete(cleanup))
 }
 
 fn page(query: &LogQuery) -> (i64, i64, i64) {
@@ -250,7 +251,7 @@ pub async fn stat_self(
     stat_inner(&state, query, Some(ctx.user_id)).await
 }
 
-/// 一次导出可覆盖的最长时间跨度，与前端 `DEFAULT_MAX_RANGE_DAYS` 一致。
+/// `log_setting.max_range_days` 未设置时的一次导出最长时间跨度，与前端 `DEFAULT_MAX_RANGE_DAYS` 一致。
 pub const MAX_EXPORT_DAYS: i64 = 365;
 
 /// 导出分页大小：单页约千条日志，处理完即释放，避免整表驻留内存。
@@ -281,8 +282,8 @@ fn claim_export_slot(busy: &Arc<Mutex<HashSet<i64>>>, user_id: i64) -> Option<Ex
     }
 }
 
-fn export_range(query: &LogQuery) -> Result<(i64, i64), ApiError> {
-    let max_secs = MAX_EXPORT_DAYS * 24 * 60 * 60;
+fn export_range(query: &LogQuery, max_days: i64) -> Result<(i64, i64), ApiError> {
+    let max_secs = max_days * 24 * 60 * 60;
     let end = query
         .end_timestamp
         .filter(|v| *v > 0)
@@ -290,7 +291,7 @@ fn export_range(query: &LogQuery) -> Result<(i64, i64), ApiError> {
     match query.start_timestamp.filter(|v| *v > 0) {
         Some(start) if end - start > max_secs => Err(ApiError::new(
             StatusCode::OK,
-            format!("The time range cannot exceed {MAX_EXPORT_DAYS} days"),
+            format!("The time range cannot exceed {max_days} days"),
         )),
         Some(start) => Ok((start, end)),
         None => Ok((end - max_secs, end)),
@@ -326,7 +327,14 @@ async fn export_inner(
     query: LogQuery,
     scoped_user: Option<i64>,
 ) -> Result<Response, ApiError> {
-    let (start, end) = export_range(&query)?;
+    let settings = crate::settings::Settings::load(state).await;
+    if scoped_user.is_some() && !settings.log_export_enabled {
+        return Err(ApiError::new(
+            StatusCode::OK,
+            "Log export is disabled in system settings",
+        ));
+    }
+    let (start, end) = export_range(&query, settings.log_max_range_days)?;
     let mut query = query;
     query.start_timestamp = Some(start);
     query.end_timestamp = Some(end);
@@ -395,6 +403,76 @@ pub async fn export_self(
 ) -> Result<Response, ApiError> {
     let user_id = ctx.user_id;
     export_inner(&state, user_id, query, Some(user_id)).await
+}
+
+/// 一次清理最多删除的日志行数。分批而不是一条语句删空，
+/// 是为了让长事务不长时间占住 WAL 写锁。
+const CLEAN_DEFAULT_LIMIT: i64 = 50_000;
+const CLEAN_MAX_LIMIT: i64 = 100_000;
+
+#[derive(Deserialize, Default)]
+struct CleanQuery {
+    before: Option<i64>,
+    limit: Option<i64>,
+}
+
+async fn cleanup(
+    State(state): State<AppState>,
+    Query(query): Query<CleanQuery>,
+) -> Result<Response, ApiError> {
+    let Some(before) = query.before.filter(|v| *v > 0) else {
+        return Err(ApiError::new(
+            StatusCode::OK,
+            "A valid before timestamp is required",
+        ));
+    };
+    if before >= now() {
+        return Err(ApiError::new(
+            StatusCode::OK,
+            "The cutoff time must be in the past",
+        ));
+    }
+    let limit = query
+        .limit
+        .filter(|v| *v > 0)
+        .unwrap_or(CLEAN_DEFAULT_LIMIT)
+        .min(CLEAN_MAX_LIMIT);
+    let ids: Vec<i64> =
+        sqlx::query_scalar("SELECT id FROM logs WHERE created_at < ? ORDER BY id LIMIT ?")
+            .bind(before)
+            .bind(limit)
+            .fetch_all(&state.pool)
+            .await
+            .map_err(internal)?;
+
+    let mut deleted = 0;
+    if !ids.is_empty() {
+        let mut qb: QueryBuilder<'_, Sqlite> = QueryBuilder::new("DELETE FROM logs WHERE id IN (");
+        for (index, id) in ids.iter().enumerate() {
+            if index > 0 {
+                qb.push(",");
+            }
+            qb.push_bind(*id);
+        }
+        qb.push(")");
+        deleted = qb
+            .build()
+            .execute(&state.pool)
+            .await
+            .map_err(internal)?
+            .rows_affected() as i64;
+    }
+
+    let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM logs WHERE created_at < ?")
+        .bind(before)
+        .fetch_one(&state.pool)
+        .await
+        .map_err(internal)?;
+    Ok(json_ok(&json!({
+        "deleted": deleted,
+        "remaining": remaining,
+        "has_more": remaining > 0,
+    })))
 }
 
 fn now() -> i64 {

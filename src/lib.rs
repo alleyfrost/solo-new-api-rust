@@ -9,6 +9,7 @@ pub mod relay;
 pub mod retry;
 pub mod routing;
 pub mod routes;
+pub mod settings;
 pub mod state;
 pub mod upstream;
 pub mod web;
