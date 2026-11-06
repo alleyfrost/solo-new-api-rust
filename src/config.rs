@@ -18,7 +18,7 @@ impl Config {
             web_dist: PathBuf::from(env_or("WEB_DIST", "./web/dist")),
             jwt_secret_path: PathBuf::from(env_or("JWT_SECRET_PATH", "/data/.rust_jwt_secret")),
             trust_proxy_headers: env_or("TRUST_PROXY_HEADERS", "true") == "true",
-            max_request_bytes: env_or("MAX_REQUEST_BYTES", "67108864").parse().unwrap_or(67_108_864),
+            max_request_bytes: env_or("MAX_REQUEST_BYTES", "33554432").parse().unwrap_or(33_554_432),
         }
     }
 }
