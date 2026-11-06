@@ -121,7 +121,7 @@
 | 渠道管理 | 复刻（核心） | 已实现 | M3：列表/新建/编辑/删除/启停/查看密钥/多 Key 轮询；M4 补齐上游测试、获取模型、优先级拖拽重排（`/api/channel/priority/*`）、复制（`/api/channel/copy/:id`）、修复一致性（`/api/channel/fix`）。多 Key 管理面板、Ollama 模型管理、推理状态、上游模型自动同步入口已裁剪（依赖 Go 任务系统/Redis） |
 | 用量日志 | 复刻 | 已实现 | M3：列表/筛选/统计/用户详情；导出沿用前端流式接口。M4 收敛为通用日志：任务/MJ 日志、金额与定价展示、审计与请求策略详情随对应后端一起裁剪 |
 | 用量看板 | 复刻 | 已实现 | M3：概览与模型调用分析按 logs 聚合；M4 金额口径全部改为用量口径（tokens/次数/耗时） |
-| 模型管理 | 复刻（基础） | 已实现 | M3：列表/新建/编辑/启停/软删除；M4 裁剪部署、供应商运营与上游同步 |
+| 模型管理 | 复刻（基础） | 已实现 | M3：列表/新建/编辑/启停/软删除；M4 补齐 `include_channel_models` 的渠道模型并集与广场状态派生（`square_state` 按 abilities/channels 计算，含按状态筛选后的分页）、`configured_channel_count`/`bound_channels`/`enable_groups`/`matched_models` 富化、`vendor_counts` 与 `/api/vendors` 真实读取；裁剪部署、供应商运营与上游同步。与 Go 的唯一可见差异：渠道派生行（`id=0`）的“展示策略”列显示 `—`，Go 会按 `status=0` 显示“未展示”，但那是对一条本就没有的规则做断言 |
 | 系统设置 | 不复刻 | 不复刻 | 配置走环境变量/少量 DB option |
 | 用户管理 / 钱包 / 订阅 / 兑换码 | 不复刻 | 不复刻 | 单用户 |
 | 安全（2FA/Passkey）/ 个人资料 | 个人资料复刻，2FA/Passkey 不复刻 | 已实现 | 个人资料 = 基本资料 + 改密码 + 会话管理 |
@@ -157,6 +157,8 @@
 | 24 路并发流式 | 通过 | 24/24 完成、9.69 MB 中转；基线 30.4 → 峰值 47.0 → 结束 33.0 MiB；24 条日志 usage 正确 |
 | 请求体硬上限 | 通过 | 70 MB 请求返回 `413`；默认上限由 64 MiB 收紧为 32 MiB（`MAX_REQUEST_BYTES`） |
 | 管理 API | 通过 | token/channel/models/group/log/stat/data 全部 `success:true` |
+| 浏览器逐页实测（2026-11-07，宿主机直跑 + 最新 `web/dist`） | 通过 | `/keys` 分组列只显示 `default`/`vip`（臆造的 1x 倍数已移除）；`/playground` 空状态与输入区（模型/分组选择器、发送）正常；`/profile` = 基本资料 + 改密码 + 会话管理，用量卡为 API 请求 / 输入 Token / 输出 Token；`/dashboard/flow` 桑基图按 logs 聚合出 用户→节点→令牌→分组→模型→渠道；`/models/metadata` 列出 6 个渠道派生模型，广场状态、绑定渠道与分组正确；页面零 console error，XHR 全 200 |
+| i18n 覆盖对账 | 通过 | 提取 `web/src` 全部 `t('…')` 字面量与 `zh.json` 比对，仅个人资料页两条长度提示缺 key，已补齐 7 个语言后复跑归零 |
 
 - 注意：容器运行期间不要用宿主机 `sqlite3`/`python` 改 `/tmp/solo-deploy-data/one-api.db`。宿主与 VM 共用同一 WAL `-shm` 映射会触发 `SQLITE_IOERR_WRITE (522)`，日志写失败是测试手法造成的假故障；改库要先 `docker stop`，查日志改用 `/api/log`。
 
