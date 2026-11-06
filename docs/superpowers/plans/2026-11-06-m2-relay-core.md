@@ -228,3 +228,186 @@ Expected: 全绿。
 git add src/routing.rs src/lib.rs tests/routing.rs
 git commit -m "feat(m2): channel selection with priority and multi-key rotation"
 ```
+
+---
+
+## Task 2: 上游 URL、Header 改写与 HTTP 客户端
+
+**Files:**
+- Create: `src/upstream.rs`
+- Modify: `Cargo.toml`（reqwest）、`src/lib.rs`
+- Test: `tests/upstream.rs`
+
+**Interfaces:**
+- Produces:
+  - `upstream::build_url(base_url: &str, path: &str, channel_type: i64) -> String`
+  - `upstream::rewrite_headers(client: &HeaderMap, api_key: &str, overrides: Option<&str>) -> reqwest::header::HeaderMap`
+  - `upstream::build_client() -> reqwest::Client`
+
+- [ ] **Step 1: 加依赖**
+
+```toml
+reqwest = { version = "0.13", default-features = false, features = ["rustls-tls", "stream", "json"] }
+```
+
+（若 0.13 的 feature 名不同，按编译提示改为 `rustls`。）
+
+- [ ] **Step 2: 写失败测试 `tests/upstream.rs`**
+
+```rust
+use axum::http::{HeaderMap, HeaderValue};
+
+#[test]
+fn builds_url_with_and_without_v1_suffix() {
+    assert_eq!(solo_new_api_rust::upstream::build_url("https://a.cn", "/v1/chat/completions", 1),
+               "https://a.cn/v1/chat/completions");
+    assert_eq!(solo_new_api_rust::upstream::build_url("https://a.cn/", "/v1/messages", 14),
+               "https://a.cn/v1/messages");
+    assert_eq!(solo_new_api_rust::upstream::build_url("https://a.cn/v1", "/v1/chat/completions", 1),
+               "https://a.cn/v1/chat/completions");
+}
+
+#[test]
+fn forwards_all_headers_and_sets_auth() {
+    let mut client = HeaderMap::new();
+    client.insert("x-trace-id", HeaderValue::from_static("t1"));
+    client.insert("x-drop", HeaderValue::from_static("d"));
+    let overrides = r#"{"*":true,"re:^X-Trace-.*$":true,"X-Drop":null,"X-Foo":"v-{client_header:x-trace-id}","Authorization":"Bearer {api_key}"}"#;
+    let out = solo_new_api_rust::upstream::rewrite_headers(&client, "sk-up", Some(overrides));
+    assert_eq!(out.get("x-trace-id").unwrap(), "t1");
+    assert!(out.get("x-drop").is_none());
+    assert_eq!(out.get("x-foo").unwrap(), "v-t1");
+    assert_eq!(out.get("authorization").unwrap(), "Bearer sk-up");
+    assert_eq!(out.get("accept-encoding").unwrap(), "identity");
+}
+
+#[test]
+fn regex_only_forwards_matching_when_no_wildcard() {
+    let mut client = HeaderMap::new();
+    client.insert("x-trace-id", HeaderValue::from_static("t1"));
+    client.insert("x-other", HeaderValue::from_static("o"));
+    let out = solo_new_api_rust::upstream::rewrite_headers(&client, "sk-up", Some(r#"{"re:^X-Trace-.*$":true}"#));
+    assert!(out.get("x-trace-id").is_some());
+    assert!(out.get("x-other").is_none());
+    assert_eq!(out.get("authorization").unwrap(), "Bearer sk-up");
+}
+```
+
+- [ ] **Step 3: 实现 `src/upstream.rs`**
+
+```rust
+use std::time::Duration;
+use axum::http::{HeaderMap, HeaderName, HeaderValue};
+use regex::Regex;
+
+const HOP_BY_HOP: &[&str] = &[
+    "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
+    "te", "trailer", "transfer-encoding", "upgrade", "host", "content-length",
+    "authorization", "x-api-key", "accept-encoding",
+];
+
+pub fn build_url(base_url: &str, path: &str, channel_type: i64) -> String {
+    let base = if base_url.trim().is_empty() {
+        if channel_type == 14 { "https://api.anthropic.com" } else { "https://api.openai.com" }
+    } else {
+        base_url.trim_end_matches('/')
+    };
+    let path = path.trim_start_matches('/');
+    let path = path.strip_prefix("v1/").unwrap_or(path);
+    if base.ends_with("/v1") {
+        format!("{base}/{path}")
+    } else {
+        format!("{base}/v1/{path}")
+    }
+}
+
+fn placeholder(value: &str, api_key: &str, client: &HeaderMap) -> String {
+    let mut out = value.replace("{api_key}", api_key);
+    let re = Regex::new(r"\{client_header:([^}]+)\}").unwrap();
+    out = re.replace_all(&out, |caps: &regex::Captures| {
+        let name = caps[1].to_ascii_lowercase();
+        client.get(name.as_str()).and_then(|v| v.to_str().ok()).unwrap_or("").to_string()
+    }).to_string();
+    out
+}
+
+pub fn rewrite_headers(client: &HeaderMap, api_key: &str, overrides: Option<&str>) -> HeaderMap {
+    let mut out = HeaderMap::new();
+    let mut forward_all = false;
+    let mut regexes: Vec<Regex> = Vec::new();
+    let mut sets: Vec<(String, String)> = Vec::new();
+    let mut deletes: Vec<String> = Vec::new();
+
+    if let Some(overrides) = overrides {
+        if let Ok(serde_json::Value::Object(map)) = serde_json::from_str(overrides) {
+            for (key, value) in map {
+                if key == "*" && value == serde_json::Value::Bool(true) {
+                    forward_all = true;
+                } else if let Some(pattern) = key.strip_prefix("re:") {
+                    if value == serde_json::Value::Bool(true) {
+                        // HeaderMap 的名称已小写化，匹配时忽略大小写。
+                        if let Ok(re) = Regex::new(&format!("(?i){pattern}")) { regexes.push(re); }
+                    }
+                } else if value.is_null() {
+                    deletes.push(key.to_ascii_lowercase());
+                } else if let Some(text) = value.as_str() {
+                    sets.push((key, text.to_string()));
+                }
+            }
+        }
+    }
+
+    for (name, value) in client.iter() {
+        let lname = name.as_str().to_ascii_lowercase();
+        if HOP_BY_HOP.contains(&lname.as_str()) { continue; }
+        if forward_all || regexes.iter().any(|re| re.is_match(name.as_str())) {
+            out.insert(name.clone(), value.clone());
+        }
+    }
+    for name in deletes {
+        if let Ok(name) = HeaderName::from_bytes(name.as_bytes()) { out.remove(name); }
+    }
+    for (name, value) in sets {
+        if let Ok(name) = HeaderName::from_bytes(name.as_bytes()) {
+            let value = placeholder(&value, api_key, client);
+            if let Ok(value) = HeaderValue::from_str(&value) { out.insert(name, value); }
+        }
+    }
+    if !out.contains_key("authorization") {
+        if let Ok(value) = HeaderValue::from_str(&format!("Bearer {api_key}")) {
+            out.insert(HeaderName::from_static("authorization"), value);
+        }
+    }
+    if !out.contains_key("accept-encoding") {
+        out.insert(HeaderName::from_static("accept-encoding"), HeaderValue::from_static("identity"));
+    }
+    out
+}
+
+pub fn build_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .pool_max_idle_per_host(64)
+        .tcp_nodelay(true)
+        .connect_timeout(Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .expect("build reqwest client")
+}
+```
+
+- [ ] **Step 4: `src/lib.rs` 增加 `pub mod upstream;`**
+
+- [ ] **Step 5: 运行测试**
+
+Run: `cargo test --test upstream`
+Expected: PASS。
+
+- [ ] **Step 6: 全量回归并提交（主代理）**
+
+Run: `cargo test`
+Expected: 全绿。
+
+```bash
+git add Cargo.toml Cargo.lock src/upstream.rs src/lib.rs tests/upstream.rs
+git commit -m "feat(m2): upstream url and header rewriting"
+```
