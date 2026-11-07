@@ -190,3 +190,66 @@ fn group_isolation() {
     assert!(select_channel(&caches, &state, "vip", "no-such-model", 0, &used).is_none());
     assert!(select_channel(&caches, &state, "no-such-group", "m1", 0, &used).is_none());
 }
+
+/// 轮询策略按游标顺序轮换 Key（进程内游标，不依赖 Redis）。
+#[test]
+fn polling_mode_rotates_keys_in_cursor_order() {
+    let mut caches = test_caches();
+    {
+        let ch = caches.channels.get_mut(&1).unwrap();
+        ch.key = "k1\nk2\nk3".into();
+        ch.channel_info = Some(r#"{"multi_key_mode":"polling"}"#.into());
+    }
+    let state = RoutingState::new();
+    let mut picked = Vec::new();
+    for _ in 0..3 {
+        let used = HashSet::new();
+        picked.push(
+            select_channel(&caches, &state, "vip", "m1", 0, &used)
+                .unwrap()
+                .key,
+        );
+    }
+    assert_eq!(picked, vec!["k1", "k2", "k3"]);
+}
+
+/// 随机策略每次从健康且未使用的 Key 中随机选一个，不维护游标。
+#[test]
+fn random_mode_selects_across_keys() {
+    let mut caches = test_caches();
+    {
+        let ch = caches.channels.get_mut(&1).unwrap();
+        ch.key = "k1\nk2\nk3\nk4".into();
+        ch.channel_info = Some(r#"{"multi_key_mode":"random"}"#.into());
+    }
+    let state = RoutingState::new();
+    let mut seen = HashSet::new();
+    for _ in 0..40 {
+        let used = HashSet::new();
+        seen.insert(
+            select_channel(&caches, &state, "vip", "m1", 0, &used)
+                .unwrap()
+                .key,
+        );
+    }
+    assert!(seen.len() > 1, "random mode should not stick to one key");
+}
+
+/// 随机策略同样跳过冷却中的 Key。
+#[test]
+fn random_mode_skips_unhealthy_keys() {
+    let mut caches = test_caches();
+    {
+        let ch = caches.channels.get_mut(&1).unwrap();
+        ch.key = "k1\nk2".into();
+        ch.channel_info = Some(r#"{"multi_key_mode":"random"}"#.into());
+    }
+    let state = RoutingState::new();
+    mark_key_unhealthy(&state, 1, 0);
+    for _ in 0..20 {
+        let used = HashSet::new();
+        let picked = select_channel(&caches, &state, "vip", "m1", 0, &used).unwrap();
+        assert_eq!(picked.key, "k2");
+        assert_eq!(picked.key_index, 1);
+    }
+}

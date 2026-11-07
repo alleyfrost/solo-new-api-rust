@@ -4432,17 +4432,13 @@ export function ChannelMutateDrawer({
                         </SelectContent>
                       </Select>
                       <FormDescription>
-                        {multiKeyType === 'polling' ? (
-                          <span className='text-warning'>
-                            {t(
-                              'Polling mode requires Redis and memory cache, otherwise performance will be significantly degraded'
+                        {multiKeyType === 'polling'
+                          ? t(
+                              'Polling uses an in-process cursor and needs no Redis. After a process restart it starts from the first key.'
+                            )
+                          : t(
+                              'Randomly select a key from the pool for each request'
                             )}
-                          </span>
-                        ) : (
-                          t(
-                            'Randomly select a key from the pool for each request'
-                          )
-                        )}
                       </FormDescription>
                       <FormMessage />
                     </FormItem>

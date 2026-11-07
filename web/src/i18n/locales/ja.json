@@ -4821,7 +4821,7 @@
     "Plugins can access channel credentials. Review the source and differences before installing.": "プラグインはチャネルの認証情報にアクセスできます。インストール前にソースコードと差分を確認してください。",
     "Policy JSON": "ポリシーJSON",
     "Polling": "ポーリング",
-    "Polling mode requires Redis and memory cache, otherwise performance will be significantly degraded": "ポーリングモードにはRedisとメモリキャッシュが必要です。そうでない場合、パフォーマンスが大幅に低下します",
+    "Polling uses an in-process cursor and needs no Redis. After a process restart it starts from the first key.": "ポーリングはプロセス内カーソルを使用し、Redis は不要です。プロセス再起動後は最初のキーから再開します。",
     "Poor": "悪い",
     "Port": "ポート",
     "Port must be a positive integer": "ポートは正の整数でなければなりません",

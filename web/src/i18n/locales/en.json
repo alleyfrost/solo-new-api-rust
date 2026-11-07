@@ -4821,7 +4821,7 @@
     "Plugins can access channel credentials. Review the source and differences before installing.": "Plugins can access channel credentials. Review the source and differences before installing.",
     "Policy JSON": "Policy JSON",
     "Polling": "Polling",
-    "Polling mode requires Redis and memory cache, otherwise performance will be significantly degraded": "Polling mode requires Redis and memory cache, otherwise performance will be significantly degraded",
+    "Polling uses an in-process cursor and needs no Redis. After a process restart it starts from the first key.": "Polling uses an in-process cursor and needs no Redis. After a process restart it starts from the first key.",
     "Poor": "Poor",
     "Port": "Port",
     "Port must be a positive integer": "Port must be a positive integer",

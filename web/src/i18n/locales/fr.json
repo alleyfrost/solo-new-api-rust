@@ -4821,7 +4821,7 @@
     "Plugins can access channel credentials. Review the source and differences before installing.": "Les plugins peuvent accéder aux identifiants des canaux. Examinez le code et les différences avant l’installation.",
     "Policy JSON": "JSON de stratégie",
     "Polling": "Sondage",
-    "Polling mode requires Redis and memory cache, otherwise performance will be significantly degraded": "Le mode d'interrogation nécessite Redis et un cache mémoire, sinon les performances seront considérablement dégradées",
+    "Polling uses an in-process cursor and needs no Redis. After a process restart it starts from the first key.": "L'interrogation utilise un curseur interne au processus et ne nécessite pas Redis. Après un redémarrage, elle reprend à la première clé.",
     "Poor": "Mauvais",
     "Port": "Port",
     "Port must be a positive integer": "Le port doit être un entier positif",

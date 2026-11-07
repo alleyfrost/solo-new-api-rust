@@ -4821,7 +4821,7 @@
     "Plugins can access channel credentials. Review the source and differences before installing.": "外掛可存取渠道憑證。安裝前請檢查原始碼與差異。",
     "Policy JSON": "政策 JSON",
     "Polling": "輪詢",
-    "Polling mode requires Redis and memory cache, otherwise performance will be significantly degraded": "輪詢模式需要 Redis 和記憶體緩存，否則效能將顯著下降",
+    "Polling uses an in-process cursor and needs no Redis. After a process restart it starts from the first key.": "輪詢使用進程內游標，無需 Redis；進程重啟後會從第一個密鑰重新開始。",
     "Poor": "差",
     "Port": "端口",
     "Port must be a positive integer": "端口必須為正整數",

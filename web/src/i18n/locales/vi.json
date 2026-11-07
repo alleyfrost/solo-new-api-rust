@@ -4821,7 +4821,7 @@
     "Plugins can access channel credentials. Review the source and differences before installing.": "Plugin có thể truy cập thông tin xác thực kênh. Hãy kiểm tra mã nguồn và các khác biệt trước khi cài đặt.",
     "Policy JSON": "JSON chính sách",
     "Polling": "Thăm dò",
-    "Polling mode requires Redis and memory cache, otherwise performance will be significantly degraded": "Chế độ thăm dò yêu cầu Redis và bộ nhớ đệm, nếu không hiệu suất sẽ bị suy giảm đáng kể.",
+    "Polling uses an in-process cursor and needs no Redis. After a process restart it starts from the first key.": "Chế độ thăm dò dùng con trỏ trong tiến trình và không cần Redis. Sau khi khởi động lại, con trỏ bắt đầu từ khóa đầu tiên.",
     "Poor": "Nghèo",
     "Port": "Cảng",
     "Port must be a positive integer": "Cổng phải là số nguyên dương",

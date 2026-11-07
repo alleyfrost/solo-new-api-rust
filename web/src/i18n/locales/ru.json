@@ -4821,7 +4821,7 @@
     "Plugins can access channel credentials. Review the source and differences before installing.": "Плагины могут получать доступ к учётным данным каналов. Перед установкой проверьте исходный код и различия.",
     "Policy JSON": "JSON политики",
     "Polling": "Опрос",
-    "Polling mode requires Redis and memory cache, otherwise performance will be significantly degraded": "Режим опроса требует Redis и кэш памяти, в противном случае производительность будет значительно снижена",
+    "Polling uses an in-process cursor and needs no Redis. After a process restart it starts from the first key.": "Опрос использует курсор внутри процесса и не требует Redis. После перезапуска он начинается с первого ключа.",
     "Poor": "Плохо",
     "Port": "Порт",
     "Port must be a positive integer": "Порт должен быть положительным целым числом",

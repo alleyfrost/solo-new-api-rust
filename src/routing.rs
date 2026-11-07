@@ -50,6 +50,28 @@ pub fn key_count(channel: &ChannelRow) -> usize {
     channel_keys(channel).len()
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum KeyMode {
+    Polling,
+    Random,
+}
+
+/// `channels.channel_info.multi_key_mode`：缺省/异常按轮询处理（与现有库里的配置一致）。
+/// 热路径只做子串扫描，避免每个请求反序列化 JSON。
+fn key_mode(channel: &ChannelRow) -> KeyMode {
+    let raw = channel.channel_info.as_deref().unwrap_or("");
+    let Some(start) = raw.find("\"multi_key_mode\"") else {
+        return KeyMode::Polling;
+    };
+    let rest = &raw[start..];
+    let end = rest.find('}').unwrap_or(rest.len());
+    if rest[..end].contains("random") {
+        KeyMode::Random
+    } else {
+        KeyMode::Polling
+    }
+}
+
 fn channel_keys(channel: &ChannelRow) -> Vec<String> {
     channel
         .key
@@ -148,6 +170,25 @@ pub fn select_channel(
         let keys = channel_keys(channel);
         if keys.is_empty() {
             continue;
+        }
+        if key_mode(channel) == KeyMode::Random {
+            // 随机策略不维护游标，也不需要跨进程共享状态。
+            let healthy: Vec<usize> = (0..keys.len())
+                .filter(|idx| {
+                    !used.contains(&(channel.id, *idx)) && key_healthy(state, channel.id, *idx)
+                })
+                .collect();
+            if healthy.is_empty() {
+                continue;
+            }
+            let idx = healthy[rng.gen_range(0..healthy.len())];
+            return Some(SelectedChannel {
+                channel_id: channel.id,
+                channel_type: channel.r#type,
+                channel_name: channel.name.clone(),
+                key: keys[idx].clone(),
+                key_index: idx,
+            });
         }
         let start = {
             let mut cursors = state.cursors.lock().unwrap();

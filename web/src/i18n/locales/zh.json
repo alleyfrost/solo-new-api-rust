@@ -4821,7 +4821,7 @@
     "Plugins can access channel credentials. Review the source and differences before installing.": "插件可访问渠道凭据。安装前请审查源码与差异。",
     "Policy JSON": "策略 JSON",
     "Polling": "轮询",
-    "Polling mode requires Redis and memory cache, otherwise performance will be significantly degraded": "轮询模式需要 Redis 和内存缓存，否则性能将显著下降",
+    "Polling uses an in-process cursor and needs no Redis. After a process restart it starts from the first key.": "轮询使用进程内游标，无需 Redis；进程重启后会从第一个密钥重新开始。",
     "Poor": "差",
     "Port": "端口",
     "Port must be a positive integer": "端口必须为正整数",
