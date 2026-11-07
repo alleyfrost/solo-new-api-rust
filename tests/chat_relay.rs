@@ -293,12 +293,22 @@ async fn rate_limit_rotates_key_and_retries() {
         .await;
 
     let fixture = setup(&server.uri(), "k1\nk2", 1, None, None).await;
-    let (status, _, _) = send(fixture, r#"{"model":"m1","messages":[]}"#).await;
+    let (status, _, pool) = send(fixture, r#"{"model":"m1","messages":[]}"#).await;
     assert_eq!(status, 200);
     let reqs = server.received_requests().await.unwrap();
     assert_eq!(reqs.len(), 2);
     assert_eq!(reqs[0].headers["authorization"], "Bearer k1");
     assert_eq!(reqs[1].headers["authorization"], "Bearer k2");
+
+    let other: String =
+        sqlx::query_scalar("SELECT other FROM logs WHERE type=2 ORDER BY id DESC LIMIT 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let v: serde_json::Value = serde_json::from_str(&other).unwrap();
+    assert_eq!(v["admin_info"]["is_multi_key"], true);
+    assert_eq!(v["admin_info"]["multi_key_index"], 1);
+    assert_eq!(v["admin_info"]["use_channel"], serde_json::json!(["3", "3"]));
 }
 
 #[tokio::test]

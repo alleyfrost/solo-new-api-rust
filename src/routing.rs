@@ -45,6 +45,11 @@ pub fn mark_key_unhealthy(state: &RoutingState, channel_id: i64, key_index: usiz
     map.insert((channel_id, key_index), Instant::now() + KEY_DISABLED_TTL);
 }
 
+/// 日志里用到的 Key 数量；多 Key 渠道才展示 Key 序号。
+pub fn key_count(channel: &ChannelRow) -> usize {
+    channel_keys(channel).len()
+}
+
 fn channel_keys(channel: &ChannelRow) -> Vec<String> {
     channel
         .key

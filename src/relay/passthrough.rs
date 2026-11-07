@@ -30,6 +30,9 @@ struct LogMeta {
     ip: String,
     request_id: String,
     upstream_request_id: String,
+    key_index: usize,
+    key_count: usize,
+    use_channels: Vec<String>,
     started: Instant,
 }
 
@@ -54,7 +57,12 @@ impl LogMeta {
             ip: self.ip.clone(),
             request_id: self.request_id.clone(),
             upstream_request_id: self.upstream_request_id.clone(),
-            other: relay::usage_other(usage),
+            other: relay::log_other(
+                usage,
+                self.key_count > 1,
+                self.key_index,
+                &self.use_channels,
+            ),
         }
     }
 
@@ -233,6 +241,7 @@ pub async fn relay(
     let mut used: HashSet<(i64, usize)> = HashSet::new();
     let mut last_error: Option<(StatusCode, Bytes, Option<HeaderValue>)> = None;
     let mut last_meta: Option<LogMeta> = None;
+    let mut use_channels: Vec<String> = Vec::new();
     let base_meta = LogMeta {
         origin_model: origin_model.clone(),
         stream: payload_stream,
@@ -246,6 +255,9 @@ pub async fn relay(
         ip: ip.clone(),
         request_id: request_id.clone(),
         upstream_request_id: String::new(),
+        key_index: 0,
+        key_count: 1,
+        use_channels: Vec::new(),
         started,
     };
 
@@ -272,9 +284,13 @@ pub async fn relay(
             continue;
         };
         used.insert((selected.channel_id, selected.key_index));
+        use_channels.push(selected.channel_id.to_string());
         let mut meta = base_meta.clone();
         meta.channel_id = selected.channel_id;
         meta.channel_name = selected.channel_name.clone();
+        meta.key_index = selected.key_index;
+        meta.key_count = routing::key_count(&channel);
+        meta.use_channels = use_channels.clone();
 
         let mapped = relay::map_model(&origin_model, channel.model_mapping.as_deref());
         let upstream_body = if mapped != origin_model {

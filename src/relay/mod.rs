@@ -58,8 +58,13 @@ pub fn usage_from_json(root: &Value) -> Option<Usage> {
     })
 }
 
-/// 写入 logs.other 的缓存命中字段，前端按 `cache_tokens` / `cache_creation_tokens` 展示。
-pub fn usage_other(usage: Usage) -> String {
+/// 写入 logs.other：缓存命中字段 + 渠道列需要的 Key 序号与重试链。
+pub fn log_other(
+    usage: Usage,
+    is_multi_key: bool,
+    key_index: usize,
+    use_channels: &[String],
+) -> String {
     let mut obj = serde_json::Map::new();
     if usage.cached_tokens > 0 {
         obj.insert("cache_tokens".into(), usage.cached_tokens.into());
@@ -70,9 +75,11 @@ pub fn usage_other(usage: Usage) -> String {
             usage.cache_write_tokens.into(),
         );
     }
-    if obj.is_empty() {
-        return "{}".to_string();
-    }
+    let mut admin = serde_json::Map::new();
+    admin.insert("is_multi_key".into(), is_multi_key.into());
+    admin.insert("multi_key_index".into(), (key_index as i64).into());
+    admin.insert("use_channel".into(), json!(use_channels));
+    obj.insert("admin_info".into(), Value::Object(admin));
     serde_json::to_string(&Value::Object(obj)).unwrap_or_else(|_| "{}".to_string())
 }
 
