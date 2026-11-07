@@ -69,7 +69,7 @@
 | `logs` 消费日志写入 | 复刻 | 已实现 | M2：异步批量写，`type=2`、`quota=0`，同事务更新 `tokens.accessed_time` |
 | `quota_data` 统计 | 待评估 | 待评估 | 看板可直接从 `logs` 聚合，避免双写 |
 | `user_sessions` 会话持久化 | 复刻 | 已实现 | M1：JWT + refresh cookie |
-| 多 Token 管理 | 复刻 | 已实现 | M3：列表/新建/编辑/删除/批量/查看 Key，分组、模型限制、IP 白名单 |
+| 多 Token 管理 | 复刻 | 已实现 | M3：列表/新建/编辑/删除/批量/查看 Key，分组、模型限制、IP 白名单；M5 新建支持自定义密钥（留空回落随机 48 位，编辑不改密钥） |
 | 单用户密码登录（argon2id） | 复刻 | 已实现 | M1：登录/刷新/登出 |
 | 多租户/用户管理/注册 | 不复刻 | 不复刻 | 个人使用 |
 | OAuth / 邮箱验证 / 2FA / Passkey | 不复刻 | 不复刻 | 按需求去掉 |
@@ -117,7 +117,7 @@
 | 页面 | 决策 | 状态 | 备注 |
 | --- | --- | --- | --- |
 | 登录页 | 复刻 | 已实现 | 账号密码登录，已移除注册/找回密码入口 |
-| Token 管理 | 复刻 | 已实现 | M3：列表/筛选/新建/编辑/删除/批量/查看 Key |
+| Token 管理 | 复刻 | 已实现 | M3：列表/筛选/新建/编辑/删除/批量/查看 Key。M5 增加“新建时可自填密钥”：16–64 位字母/数字/下划线（粘贴的 `sk-` 前缀写库前剥掉，因为认证按第一个 `-` 截断），留空由服务端生成 48 位；`idx_tokens_key` 不看软删行，所以先查全表再把 UNIQUE 冲突映射成同一句业务错误；编辑一律忽略传入的 `key`——换密钥会让已下发的客户端配置静默失效，要改就新建再删旧的。批量数量 >1 与自填密钥互斥 |
 | 渠道管理 | 复刻（核心） | 已实现 | M3：列表/新建/编辑/删除/启停/查看密钥/多 Key 轮询；M4 补齐上游测试、获取模型、优先级拖拽重排（`/api/channel/priority/*`）、复制（`/api/channel/copy/:id`）、修复一致性（`/api/channel/fix`）。多 Key 管理面板、Ollama 模型管理、推理状态、上游模型自动同步入口已裁剪（依赖 Go 任务系统/Redis） |
 | 用量日志 | 复刻 | 已实现 | M3：列表/筛选/统计/用户详情；导出沿用前端流式接口。M4 收敛为通用日志：任务/MJ 日志、金额与定价展示、审计与请求策略详情随对应后端一起裁剪 |
 | 用量看板 | 复刻 | 已实现 | M3：概览与模型调用分析按 logs 聚合；M4 金额口径全部改为用量口径（tokens/次数/耗时） |
@@ -165,6 +165,10 @@
 | 设置页浏览器实测（Docker :3006，2026-11-07） | 通过 | 站点信息四项可输入并保存，`/api/status` 与顶栏品牌即时更新，刷新后回读到 `SystemName=Solo 本地验收站`、`ServerAddress=https://api.example.com`；日志卡两个开关与最大导出跨度=45 保存后回读一致，跨度即时生效——60 天跨度导出返回“The time range cannot exceed 45 days”；“24 小时前”快捷钮写入截止时间；清理确认对话框（AlertDialog）确认后 23 批删除 113,666 条，日志总数 128,210 → 14,544 与 `/api/log/` 读数一致，单批最慢 91ms、全部 200，容器内存 25.2 MiB / 450 MiB |
 | 本轮实测发现并修复的两个缺陷 | 已修复 | ① 设置页无限重渲染：`useOptions()` 每帧返回新的 `values` 对象，两张卡的 `useEffect(…, [loaded])` 因此每帧 `setValues` 新对象，输入在同一 tick 被回滚、该标签页渲染进程 100% CPU。改为 `useMemo` 依赖 `query.data`（loading 期用固定空数组引用）并加 `web/src/features/settings/__tests__/use-settings.test.tsx`（改前 2 例红、改后 3 例绿），顺带把站点卡的 label 与输入框拆成兄弟节点修掉提示语换行。<br>② 历史清理返回 500：默认批次 50_000 行按 id 逐行绑定，超过该 SQLite 构建的 32766 绑定变量上限，报 `too many SQL variables`（现网快照 128,210 行、早于 24 小时的有 113,666 行时才暴露，原来的集成测试只造 200 行看不见）。删除集改为单语句子查询 `DELETE FROM logs WHERE id IN (SELECT … LIMIT ?)`（只绑 2 个变量），默认批次 5_000、上限 50_000，并加 `cleanup_round_can_delete_more_rows_than_sqlite_allows_binds`（100_000 行夹具、40_000 行匹配，改前复现同一条 500 报文、改后绿） |
 | 转发/流式/内存矩阵本轮未重跑 | 说明 | 本轮后端改动只在设置白名单模块（`src/settings.rs`、`src/routes/admin/option.rs`）、日志清理批次（`src/routes/admin/log.rs` 的 `cleanup`）与 status/notice 读取；`src/relay/*` 与上一轮通过本节全部转发、流式、断连、并发内存项时同源。全量 `cargo test` 152 例通过、`bun run test` 与 `bun run typecheck` 通过；渠道测试 6/6 走的是同一套上游客户端与协议转换，只作为新二进制的间接证据 |
+| 新建令牌自定义密钥（API，Docker :3006，2026-11-07） | 通过 | `solo-new-api-rust:local` 由 `deploy/build.sh` 重编，镜像内入口 `index.bd05961477.js` 与容器页面加载、本地 `web/dist` 三方一致；容器内存 43.78 MiB / 450 MiB。`POST /api/token/` 传 `sk-docker_custom_key_2026` → `POST /api/token/12/key` 回读 22 位裸密钥（前缀已剥），`Authorization: Bearer <裸>` 与 `Bearer sk-<裸>` 打 `/v1/models` 均 200；`key="   "` 回落 48 位随机（`uE1S…IxAp`，同样 200）；重复密钥 400 `Token key is already in use`；`tiny` 400 `Token key must be 16-64 characters`；被拒的两次没有落库（列表只剩 dk1/dk4） |
+| 编辑不改密钥 + 浏览器中文实测（Docker :3006） | 通过 | PUT 传 `key=totally_different_key_99` 后回读仍是 `docker_custom_key_2026`，旧客户端 key 继续 200——已下发配置不会静默失效。中文界面：新建抽屉标签为 名称/自定义密钥（可选）/分组/过期时间/数量，描述显示“仅支持字母、数字和下划线，长度 16-64 位。粘贴的 sk- 前缀会被去掉。密钥创建后不可修改。”；提交与既有令牌重键的表单 → toast 显示“令牌密钥已被使用”（非英文原文）；编辑抽屉标题“更新 API 密钥”只有 名称/分组/过期时间，无密钥输入。console 除预期的 401（未登录首屏）/400（重键）外，只有我注入脚本自身的一次 TypeError，页面代码无报错 |
+| 服务端错误本地化（`message_key`） | 部分实现 | `ApiError` 新增可选 `message_key`，只在显式标注时写入 JSON，其余报文形状不变（集成测试断言 `Token name is too long` 仍不带该字段）；本轮只标注三条密钥错误，7 个语言各补 7 个 key（每份 7454 key，缺失 0）。前端按 Go 的规则只用 `message_key`/`code` 翻译，所以其余管理端错误仍显示英文——见 §6 第 8 条 |
+| 本轮测试与门禁 | 通过 | `tests/admin_token.rs` 新增 5 例（HEAD 实现下 4 例红，改后 7 例绿）；前端新增 `custom-key-form.test.ts` 9 例 + 抽屉用例 4 例（HEAD 源码下 2 例红）。`cargo test` 157 通过 / 1 忽略，rustfmt 限定 `src/error.rs`、`src/routes/admin/token.rs`、`tests/admin_token.rs` 检查归零（三者 BASE 版本就 clean），clippy 无指向这三处；`bun run typecheck` 729 文件 0 错误、`bun run test` 103 文件 1044 例通过、oxfmt 限定的 5 个改动文件已合规、`copyright:check` 的 11 个 offender 全为既有文件 |
 
 - 注意：容器运行期间不要用宿主机 `sqlite3`/`python` 改 `/tmp/solo-deploy-data/one-api.db`。宿主与 VM 共用同一 WAL `-shm` 映射会触发 `SQLITE_IOERR_WRITE (522)`，日志写失败是测试手法造成的假故障；改库要先 `docker stop`，查日志改用 `/api/log`。
 - 本轮 Docker 登录用的是写在 `/tmp/solo-deploy-data` scratch 副本里的一次性 argon2id 口令（仓库快照 `data/one-api-consistent.db` 与线上库未改动），渠道 `base_url` 也只在这份副本里改指向 mock；验收后整个目录连同容器一起删除。要自己复核就重跑 `bash deploy/run-local.sh`，它会从快照重新播种，届时用真实口令登录。
@@ -199,6 +203,7 @@
 5. Switchyard 转换结果的 new-api 语义差异：用现网请求样本做黄金用例比对。
 6. `accessed_time`/`used_quota` 是否更新：倾向只更新 `accessed_time`，不改额度字段。
 7. 性能指标（`/api/perf-metrics{,/summary}`）：Go 由 relay 增量写 `perf_metrics` 表（含 ttft、成功/失败计数），本项目不新增表、不改表现有结构，`/api/perf-metrics*` 目前返回空，看板的性能健康面板因此显示空状态。**未实现，排在本地 Docker + 浏览器验收之后**。口径决策：`logs` 能诚实派生的只有平均耗时、吞吐（completion_tokens/use_time）与请求数（走 `idx_created_at_id`/`idx_logs_model_name` 聚合）；成功率算不出来——Rust 侧 `src/logging.rs:82` 的 INSERT 把 type 固定写 2、`other` 固定 `{}`、`content` 为 NULL，失败请求与零 token 请求在库里不可区分，ttft 也从未记录。要补成功率，需先在 relay 侧给失败路径落可判别标记（新 type 取值或 `other` 里的错误字段），再按 logs 聚合；面板不展示无法诚实计算的指标。
+8. 管理端错误本地化覆盖：Go 用 `common.ApiErrorT(c, "<英文原文>", params)` 同时下发 `message`（渲染后的英文）与 `message_key`（英文原文，即前端 locale 的 key），前端 `getServerMessage()` 只翻 `message_key`/`code`。Rust 的 `ApiError` 现在支持可选 `message_key`，但本轮只给三条密钥错误标注；其余既有管理端报文（`Token name is too long`、渠道/模型/日志各模块的英文 message）仍无 `message_key`，中文界面会直接显示英文原文。补齐方式是逐个把 message 改成 `ApiError::new(...).with_message_key(...)` 并核对 locale 里已有该 key——纯机械工作，排在功能验收之后；顺带要决定是否统一收进一个 `ApiErrorT` 风格构造函数，避免各处复制英文串。
 
 ## 7. 里程碑
 
