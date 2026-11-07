@@ -172,6 +172,7 @@ export interface DashboardFilters {
   end_timestamp?: Date
   time_granularity?: TimeGranularity
   username?: string
+  token_id?: number
 }
 
 export type ConsumptionDistributionChartType = 'bar' | 'area'

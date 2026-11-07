@@ -36,6 +36,7 @@ export async function getUserQuotaDates(
     end_timestamp: number
     default_time?: string
     username?: string
+    token_id?: number
   },
   isAdmin = false
 ) {

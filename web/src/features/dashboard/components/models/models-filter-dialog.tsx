@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useQuery } from '@tanstack/react-query'
 import { Filter, RotateCcw, Calendar, Search } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -45,6 +46,7 @@ import type {
   DashboardChartPreferences,
   DashboardFilters,
 } from '@/features/dashboard/types'
+import { getApiKeys } from '@/features/keys/api'
 import { getRollingDateRange, type TimeGranularity } from '@/lib/time'
 import { cn } from '@/lib/utils'
 
@@ -57,6 +59,7 @@ interface ModelsFilterProps {
   onReset: () => void
   titleKey?: string
   descriptionKey?: string
+  showTokenFilter?: boolean
 }
 
 // Quick-range presets imply a sensible granularity (matching the app's
@@ -106,6 +109,12 @@ export function ModelsFilter(props: ModelsFilterProps) {
   const [selectedRange, setSelectedRange] = useState<number | null>(() =>
     detectQuickRangeDays(props.currentFilters)
   )
+  const tokenQuery = useQuery({
+    queryKey: ['dashboard', 'filter-tokens'],
+    queryFn: () => getApiKeys({ p: 1, size: 1000 }),
+    enabled: props.showTokenFilter === true && open,
+  })
+  const tokenOptions = tokenQuery.data?.data?.items ?? []
 
   const handleOpenChange = (nextOpen: boolean) => {
     // Sync the editing state from the applied filters every time the dialog
@@ -143,7 +152,7 @@ export function ModelsFilter(props: ModelsFilterProps) {
 
   const handleChange = (
     field: keyof DashboardFilters,
-    value: Date | string | undefined
+    value: Date | string | number | undefined
   ) => {
     setFilters((prev) => ({ ...prev, [field]: value }))
     if (field === 'start_timestamp' || field === 'end_timestamp')
@@ -220,6 +229,45 @@ export function ModelsFilter(props: ModelsFilterProps) {
               ))}
             </div>
           </div>
+
+          {props.showTokenFilter && (
+            <>
+              <SectionDivider label={t('Key')} />
+              <div className='grid gap-2'>
+                <Label htmlFor='token_id'>{t('Key')}</Label>
+                <Select
+                  items={[
+                    { value: 'all', label: t('All keys') },
+                    ...tokenOptions.map((token) => ({
+                      value: String(token.id),
+                      label: token.name,
+                    })),
+                  ]}
+                  value={filters.token_id ? String(filters.token_id) : 'all'}
+                  onValueChange={(value) =>
+                    handleChange(
+                      'token_id',
+                      value === 'all' ? undefined : Number(value)
+                    )
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder={t('All keys')} />
+                  </SelectTrigger>
+                  <SelectContent alignItemWithTrigger={false}>
+                    <SelectGroup>
+                      <SelectItem value='all'>{t('All keys')}</SelectItem>
+                      {tokenOptions.map((token) => (
+                        <SelectItem key={token.id} value={String(token.id)}>
+                          {token.name}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </div>
+            </>
+          )}
 
           <SectionDivider label={t('Custom Time Range')} />
 

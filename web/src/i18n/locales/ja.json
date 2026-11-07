@@ -4,6 +4,7 @@
     "1000": "1000",
     "10000": "10000",
     "A custom key can only be used for one key at a time": "カスタムキーは一度に1つだけ作成できます",
+    "All keys": "すべてのキー",
     "At most {{max}} image models": "画像モデルは最大 {{max}} 個です",
     "Changing your password signs out every other device; this session stays active.": "パスワードを変更すると他のすべてのデバイスからサインアウトされますが、このセッションは有効なままです。",
     "Completion tokens generated": "生成された補完トークン",

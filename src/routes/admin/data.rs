@@ -15,6 +15,7 @@ pub struct DataQuery {
     pub end_timestamp: Option<i64>,
     pub default_time: Option<String>,
     pub username: Option<String>,
+    pub token_id: Option<i64>,
 }
 
 pub fn router() -> Router<AppState> {
@@ -43,6 +44,7 @@ async fn grouped(
     let (start, end) = range(query);
     let user_filter = user_id.unwrap_or(0);
     let username = query.username.clone().unwrap_or_default();
+    let token_filter = query.token_id.unwrap_or(0);
     let mut sql = String::from(
         "SELECT created_at/86400*86400 AS day, COALESCE(model_name,'') AS model_name, COALESCE(username,'') AS username, \
          COALESCE(SUM(prompt_tokens),0)+COALESCE(SUM(completion_tokens),0) AS token_used, \
@@ -50,7 +52,7 @@ async fn grouped(
          COALESCE(SUM(CASE WHEN json_valid(other) THEN json_extract(other,'$.cache_creation_tokens') END),0) AS cache_creation_tokens, \
          COUNT(*) AS count, COALESCE(SUM(quota),0) AS quota FROM logs \
          WHERE type=2 AND created_at>=? AND created_at<=? \
-         AND (?=0 OR user_id=?) AND (?='' OR username=?)",
+         AND (?=0 OR user_id=?) AND (?='' OR username=?) AND (?=0 OR token_id=?)",
     );
     if by_user {
         sql.push_str(" GROUP BY day, username ORDER BY day ASC");
@@ -64,6 +66,8 @@ async fn grouped(
         .bind(user_filter)
         .bind(&username)
         .bind(&username)
+        .bind(token_filter)
+        .bind(token_filter)
         .fetch_all(&state.pool)
         .await
         .map_err(internal)?;

@@ -117,6 +117,12 @@ async fn log_list_filters_and_stats() {
     assert_eq!(m1["cache_read_tokens"], 7);
     assert_eq!(m1["cache_creation_tokens"], 3);
 
+    let (_, by_token) = get(&app, &format!("/api/data?start_timestamp={}&end_timestamp={}&token_id=2", now - 3600, now + 1)).await;
+    assert_eq!(by_token["data"].as_array().unwrap().len(), 1);
+    assert_eq!(by_token["data"][0]["token_used"], 45);
+    let (_, no_token) = get(&app, &format!("/api/data?start_timestamp={}&end_timestamp={}&token_id=999", now - 3600, now + 1)).await;
+    assert_eq!(no_token["data"].as_array().unwrap().len(), 0);
+
     let (_, users) = get(&app, &format!("/api/data/users?start_timestamp={}&end_timestamp={}", now - 3600, now + 1)).await;
     assert_eq!(users["data"][0]["username"], "root");
 

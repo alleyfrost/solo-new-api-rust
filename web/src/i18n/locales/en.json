@@ -4,6 +4,7 @@
     "1000": "1000",
     "10000": "10000",
     "A custom key can only be used for one key at a time": "A custom key can only be used for one key at a time",
+    "All keys": "All keys",
     "At most {{max}} image models": "At most {{max}} image models",
     "Changing your password signs out every other device; this session stays active.": "Changing your password signs out every other device; this session stays active.",
     "Completion tokens generated": "Completion tokens generated",

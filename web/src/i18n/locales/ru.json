@@ -4,6 +4,7 @@
     "1000": "1000",
     "10000": "10000",
     "A custom key can only be used for one key at a time": "Пользовательский ключ можно создавать только по одному",
+    "All keys": "Все ключи",
     "At most {{max}} image models": "Не более {{max}} моделей изображений",
     "Changing your password signs out every other device; this session stays active.": "Смена пароля выполнит выход на всех остальных устройствах; текущая сессия останется активной.",
     "Completion tokens generated": "Сгенерировано токенов завершения",

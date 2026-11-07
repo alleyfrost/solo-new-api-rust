@@ -4,6 +4,7 @@
     "1000": "1000",
     "10000": "10000",
     "A custom key can only be used for one key at a time": "自定义密钥一次只能创建一个",
+    "All keys": "全部密钥",
     "At most {{max}} image models": "生图模型最多 {{max}} 个",
     "Changing your password signs out every other device; this session stays active.": "修改密码会退出其他所有设备；当前会话保持登录。",
     "Completion tokens generated": "已生成的补全 Token",

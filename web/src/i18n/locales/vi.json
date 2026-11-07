@@ -4,6 +4,7 @@
     "1000": "1000",
     "10000": "10000",
     "A custom key can only be used for one key at a time": "Khóa tùy chỉnh chỉ tạo được từng khóa một",
+    "All keys": "Tất cả khóa",
     "At most {{max}} image models": "Tối đa {{max}} mô hình tạo ảnh",
     "Changing your password signs out every other device; this session stays active.": "Đổi mật khẩu sẽ đăng xuất khỏi mọi thiết bị khác; phiên hiện tại vẫn hoạt động.",
     "Completion tokens generated": "Token hoàn tất đã tạo",

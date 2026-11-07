@@ -4,6 +4,7 @@
     "1000": "1000",
     "10000": "10000",
     "A custom key can only be used for one key at a time": "Une clé personnalisée ne permet de créer qu’une seule clé à la fois",
+    "All keys": "Toutes les clés",
     "At most {{max}} image models": "Au maximum {{max}} modèles d'image",
     "Changing your password signs out every other device; this session stays active.": "La modification de votre mot de passe déconnecte tous les autres appareils ; cette session reste active.",
     "Completion tokens generated": "Tokens de complétion générés",
