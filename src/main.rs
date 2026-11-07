@@ -8,13 +8,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .block_on(run())
 }
 
-/// argon2id 的 19 MiB 工作内存按次分配；glibc 默认把这种大块留在按线程划分的
-/// arena 里，释放后也不还给内核，并发登录会把 RSS 按 19 MiB × arena 数抬高。
-/// 阈值压到 16 MiB 迫使大块走 mmap/munmap，trim 让堆顶空闲页尽快归还。
+/// argon2id 的 19 MiB 工作内存与大请求体缓冲都在堆上按次分配；glibc 默认会把
+/// 这类大块留在按线程划分的 arena 里，释放后不还给内核（实测 4×8 MiB 请求后
+/// RSS 长期停在 170 MiB）。把 mmap 阈值压到 1 MiB，让大块走 mmap/munmap 直接
+/// 归还；trim 兜住堆顶空闲页，arena 限 2 避免按线程膨胀。
 #[cfg(all(target_os = "linux", target_env = "gnu"))]
 fn tune_glibc_allocator() {
     unsafe {
-        libc::mallopt(libc::M_MMAP_THRESHOLD, 16 * 1024 * 1024);
+        libc::mallopt(libc::M_MMAP_THRESHOLD, 1024 * 1024);
         libc::mallopt(libc::M_TRIM_THRESHOLD, 128 * 1024);
         libc::mallopt(libc::M_ARENA_MAX, 2);
     }
@@ -43,6 +44,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let (log_tx, log_rx) = logging::channel(20_000);
     let writer = logging::spawn_writer(pool.clone(), log_rx);
     let state = state::AppState::new(config.clone(), pool, caches, jwt_secret, Some(log_tx));
+    solo_new_api_rust::mem::spawn_periodic_trim();
 
     let login_route = axum::Router::new()
         .route("/api/user/login", axum::routing::post(routes::user::login))
@@ -135,6 +137,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .layer(axum::extract::DefaultBodyLimit::max(
             config.max_request_bytes,
         ))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            solo_new_api_rust::mem::large_body_gate,
+        ))
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
             auth::token::token_auth,
@@ -150,6 +156,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         )
         .layer(axum::extract::DefaultBodyLimit::max(
             config.max_request_bytes,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            solo_new_api_rust::mem::large_body_gate,
         ))
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),

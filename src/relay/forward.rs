@@ -269,6 +269,20 @@ fn translate_event(
     }
 }
 
+fn inject_include_usage(payload: &mut Value) {
+    let obj = payload.as_object_mut().expect("object");
+    let options = obj
+        .entry("stream_options".to_string())
+        .or_insert_with(|| json!({}));
+    if !options.is_object() {
+        *options = json!({});
+    }
+    options
+        .as_object_mut()
+        .expect("object")
+        .insert("include_usage".to_string(), Value::Bool(true));
+}
+
 pub async fn relay(
     state: AppState,
     ctx: TokenContext,
@@ -277,9 +291,11 @@ pub async fn relay(
     client: Wire,
 ) -> Response {
     let started = Instant::now();
-    let Ok(payload) = serde_json::from_slice::<Value>(&body) else {
+    let Ok(mut payload) = serde_json::from_slice::<Value>(&body) else {
         return client_error(client, StatusCode::BAD_REQUEST, "invalid JSON body".to_string());
     };
+    // 原始字节已解析完，立即释放，避免大请求体与 JSON 树、上游副本同时驻留。
+    drop(body);
     if !payload.is_object() {
         return client_error(
             client,
@@ -368,6 +384,23 @@ pub async fn relay(
         started,
     };
 
+    // 同格式 chat 请求只序列化一次：后续每次尝试复用 Bytes（零拷贝），
+    // 先释放 JSON 树，避免大请求体在重试路径上叠加多份拷贝。
+    let chat_body: Option<Bytes> = if client == Wire::Chat {
+        let mut prepared = std::mem::take(&mut payload);
+        if stream {
+            inject_include_usage(&mut prepared);
+        }
+        match serde_json::to_vec(&prepared) {
+            Ok(bytes) => Some(Bytes::from(bytes)),
+            Err(e) => {
+                return client_error(client, StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
+            }
+        }
+    } else {
+        None
+    };
+
     for attempt in 0..=max_retry {
         let selected = {
             let caches = state.caches.read().expect("cache lock");
@@ -400,46 +433,106 @@ pub async fn relay(
         meta.use_channels = use_channels.clone();
         let upstream_wire = upstream_wire(channel.r#type);
 
-        let mut outbound = if client == upstream_wire {
-            payload.clone()
-        } else {
-            match engine().translate_request(
-                client.sy(),
-                upstream_wire.sy(),
-                &payload,
-                &TranslationPolicy::default(),
-            ) {
-                Ok(out) => out.body,
-                Err(e) => {
-                    return client_error(
-                        client,
-                        StatusCode::BAD_REQUEST,
-                        format!("request translation failed: {e}"),
-                    );
+        let mapped = relay::map_model(&origin_model, channel.model_mapping.as_deref());
+        let upstream_body: Bytes = if let Some(base) = &chat_body {
+            if upstream_wire == Wire::Chat {
+                if mapped == origin_model {
+                    base.clone()
+                } else {
+                    let mut value: Value = match serde_json::from_slice(base) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            return client_error(
+                                client,
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                e.to_string(),
+                            );
+                        }
+                    };
+                    value["model"] = Value::String(mapped);
+                    match serde_json::to_vec(&value) {
+                        Ok(b) => Bytes::from(b),
+                        Err(e) => {
+                            return client_error(
+                                client,
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                e.to_string(),
+                            );
+                        }
+                    }
+                }
+            } else {
+                let value: Value = match serde_json::from_slice(base) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        return client_error(
+                            client,
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            e.to_string(),
+                        );
+                    }
+                };
+                match engine().translate_request(
+                    Wire::Chat.sy(),
+                    upstream_wire.sy(),
+                    &value,
+                    &TranslationPolicy::default(),
+                ) {
+                    Ok(mut out) => {
+                        if mapped != origin_model {
+                            out.body["model"] = Value::String(mapped);
+                        }
+                        match serde_json::to_vec(&out.body) {
+                            Ok(b) => Bytes::from(b),
+                            Err(e) => {
+                                return client_error(
+                                    client,
+                                    StatusCode::INTERNAL_SERVER_ERROR,
+                                    e.to_string(),
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        return client_error(
+                            client,
+                            StatusCode::BAD_REQUEST,
+                            format!("request translation failed: {e}"),
+                        );
+                    }
                 }
             }
-        };
-        let mapped = relay::map_model(&origin_model, channel.model_mapping.as_deref());
-        if mapped != origin_model {
-            outbound["model"] = Value::String(mapped);
-        }
-        if stream && upstream_wire == Wire::Chat {
-            let obj = outbound.as_object_mut().expect("object");
-            let options = obj
-                .entry("stream_options".to_string())
-                .or_insert_with(|| json!({}));
-            if !options.is_object() {
-                *options = json!({});
+        } else {
+            let mut outbound = if client == upstream_wire {
+                payload.clone()
+            } else {
+                match engine().translate_request(
+                    client.sy(),
+                    upstream_wire.sy(),
+                    &payload,
+                    &TranslationPolicy::default(),
+                ) {
+                    Ok(out) => out.body,
+                    Err(e) => {
+                        return client_error(
+                            client,
+                            StatusCode::BAD_REQUEST,
+                            format!("request translation failed: {e}"),
+                        );
+                    }
+                }
+            };
+            if mapped != origin_model {
+                outbound["model"] = Value::String(mapped);
             }
-            options
-                .as_object_mut()
-                .expect("object")
-                .insert("include_usage".to_string(), Value::Bool(true));
-        }
-        let upstream_body = match serde_json::to_vec(&outbound) {
-            Ok(b) => b,
-            Err(e) => {
-                return client_error(client, StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
+            if stream && upstream_wire == Wire::Chat {
+                inject_include_usage(&mut outbound);
+            }
+            match serde_json::to_vec(&outbound) {
+                Ok(b) => Bytes::from(b),
+                Err(e) => {
+                    return client_error(client, StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
+                }
             }
         };
         let url = upstream::build_url(

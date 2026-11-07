@@ -58,6 +58,7 @@ pub struct AppState {
     pub log_tx: Option<tokio::sync::mpsc::Sender<crate::logging::LogEntry>>,
     /// 正在导出日志的用户；同一用户同时只允许一个导出。
     pub export_slots: Arc<Mutex<HashSet<i64>>>,
+    pub body_gate: Arc<crate::mem::BodyGate>,
 }
 
 impl AppState {
@@ -77,6 +78,7 @@ impl AppState {
             routing: Arc::new(crate::routing::RoutingState::new()),
             log_tx,
             export_slots: Arc::new(Mutex::new(HashSet::new())),
+            body_gate: Arc::new(crate::mem::BodyGate::default()),
         }
     }
 

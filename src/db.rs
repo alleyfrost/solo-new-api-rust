@@ -1,7 +1,7 @@
 use std::fmt;
 use std::path::Path;
 
-use sqlx::sqlite::SqliteConnectOptions;
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::{ConnectOptions, SqlitePool};
 
 #[derive(Debug)]
@@ -29,8 +29,16 @@ pub async fn connect(path: &Path) -> Result<SqlitePool, sqlx::Error> {
         .synchronous(sqlx::sqlite::SqliteSynchronous::Normal)
         .busy_timeout(std::time::Duration::from_millis(5000))
         .foreign_keys(true)
+        // 每连接 1 MiB 页缓存；单用户读多写少，压低连接数即可控住常驻内存。
+        .pragma("cache_size", "-1024")
         .disable_statement_logging();
-    SqlitePool::connect_with(opts).await
+    SqlitePoolOptions::new()
+        .max_connections(8)
+        .min_connections(1)
+        .idle_timeout(std::time::Duration::from_secs(60))
+        .max_lifetime(std::time::Duration::from_secs(1800))
+        .connect_with(opts)
+        .await
 }
 
 pub async fn validate_schema(pool: &SqlitePool) -> Result<(), SchemaError> {
