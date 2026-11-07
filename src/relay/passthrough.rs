@@ -16,6 +16,7 @@ use crate::{retry, routing, upstream};
 
 const RESPONSE_BUFFER_LIMIT: usize = 4 * 1024 * 1024;
 
+#[derive(Clone)]
 struct LogMeta {
     origin_model: String,
     stream: bool,
@@ -35,6 +36,8 @@ struct LogMeta {
 impl LogMeta {
     fn entry(&self, usage: Usage) -> LogEntry {
         LogEntry {
+            log_type: logging::LOG_TYPE_CONSUME,
+            content: None,
             created_at: now(),
             user_id: self.user_id,
             username: self.username.clone(),
@@ -51,7 +54,18 @@ impl LogMeta {
             ip: self.ip.clone(),
             request_id: self.request_id.clone(),
             upstream_request_id: self.upstream_request_id.clone(),
+            other: relay::usage_other(usage),
+        }
+    }
+
+    fn error_entry(&self, status: StatusCode, message: &str) -> LogEntry {
+        LogEntry {
+            log_type: logging::LOG_TYPE_ERROR,
+            content: Some(format!("status_code={}, {message}", status.as_u16())),
+            prompt_tokens: 0,
+            completion_tokens: 0,
             other: "{}".to_string(),
+            ..self.entry(Usage::default())
         }
     }
 }
@@ -218,6 +232,22 @@ pub async fn relay(
     let request_id = format!("req_{}", uuid::Uuid::new_v4().simple());
     let mut used: HashSet<(i64, usize)> = HashSet::new();
     let mut last_error: Option<(StatusCode, Bytes, Option<HeaderValue>)> = None;
+    let mut last_meta: Option<LogMeta> = None;
+    let base_meta = LogMeta {
+        origin_model: origin_model.clone(),
+        stream: payload_stream,
+        channel_id: 0,
+        channel_name: String::new(),
+        user_id: ctx.user_id,
+        username: username.clone(),
+        token_id: ctx.token_id,
+        token_name: ctx.token_name.clone(),
+        group: group.clone(),
+        ip: ip.clone(),
+        request_id: request_id.clone(),
+        upstream_request_id: String::new(),
+        started,
+    };
 
     for attempt in 0..=max_retry {
         let selected = {
@@ -242,6 +272,9 @@ pub async fn relay(
             continue;
         };
         used.insert((selected.channel_id, selected.key_index));
+        let mut meta = base_meta.clone();
+        meta.channel_id = selected.channel_id;
+        meta.channel_name = selected.channel_name.clone();
 
         let mapped = relay::map_model(&origin_model, channel.model_mapping.as_deref());
         let upstream_body = if mapped != origin_model {
@@ -288,6 +321,7 @@ pub async fn relay(
                     Bytes::from(error_body),
                     Some(HeaderValue::from_static("application/json")),
                 ));
+                last_meta = Some(meta.clone());
                 if retry::decide(None, attempt, max_retry) == retry::RetryDecision::Retry {
                     tokio::time::sleep(retry::backoff(None, attempt)).await;
                     continue;
@@ -304,21 +338,8 @@ pub async fn relay(
                 .and_then(|v| v.to_str().ok())
                 .map(|v| v.contains("text/event-stream"))
                 .unwrap_or(false);
-            let meta = LogMeta {
-                origin_model: origin_model.clone(),
-                stream: payload_stream || is_sse,
-                channel_id: selected.channel_id,
-                channel_name: selected.channel_name.clone(),
-                user_id: ctx.user_id,
-                username: username.clone(),
-                token_id: ctx.token_id,
-                token_name: ctx.token_name.clone(),
-                group: group.clone(),
-                ip: ip.clone(),
-                request_id: request_id.clone(),
-                upstream_request_id: upstream_request_id(response.headers()),
-                started,
-            };
+            meta.stream = payload_stream || is_sse;
+            meta.upstream_request_id = upstream_request_id(response.headers());
 
             if is_sse {
                 let log_state = state.clone();
@@ -388,7 +409,8 @@ pub async fn relay(
         let error_ct = response.headers().get(CONTENT_TYPE).cloned();
         let bytes = response.bytes().await.unwrap_or_default();
         last_error = Some((status, bytes, error_ct));
-        if matches!(status.as_u16(), 401 | 403 | 429) {
+        last_meta = Some(meta.clone());
+        if matches!(status.as_u16(), 401 | 403) {
             routing::mark_key_unhealthy(&state.routing, selected.channel_id, selected.key_index);
         }
         if retry::decide(Some(status.as_u16()), attempt, max_retry) == retry::RetryDecision::Retry {
@@ -399,12 +421,26 @@ pub async fn relay(
     }
 
     match last_error {
-        Some((status, bytes, ct)) => upstream_error_response(status, &bytes, ct),
-        None => relay::openai_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "no available channel",
-            "no_channel",
-        ),
+        Some((status, bytes, ct)) => {
+            let meta = last_meta.unwrap_or_else(|| base_meta.clone());
+            let message = relay::upstream_error_message(&bytes);
+            logging::enqueue(&state, meta.error_entry(status, &message)).await;
+            upstream_error_response(status, &bytes, ct)
+        }
+        None => {
+            logging::enqueue(
+                &state,
+                base_meta
+                    .clone()
+                    .error_entry(StatusCode::SERVICE_UNAVAILABLE, "no available channel"),
+            )
+            .await;
+            relay::openai_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "no available channel",
+                "no_channel",
+            )
+        }
     }
 }
 

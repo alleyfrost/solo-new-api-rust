@@ -17,7 +17,8 @@ fn usage_reads_openai_and_anthropic_names() {
         usage_from_json(&v),
         Some(Usage {
             prompt_tokens: 3,
-            completion_tokens: 4
+            completion_tokens: 4,
+            ..Usage::default()
         })
     );
     let v: serde_json::Value =
@@ -26,10 +27,29 @@ fn usage_reads_openai_and_anthropic_names() {
         usage_from_json(&v),
         Some(Usage {
             prompt_tokens: 5,
-            completion_tokens: 6
+            completion_tokens: 6,
+            ..Usage::default()
         })
     );
     assert_eq!(usage_from_json(&serde_json::json!({"id": "x"})), None);
+}
+
+#[test]
+fn usage_reads_cache_hit_fields() {
+    let v: serde_json::Value = serde_json::from_str(
+        r#"{"usage":{"prompt_tokens":10,"completion_tokens":2,"prompt_tokens_details":{"cached_tokens":7}}}"#,
+    )
+    .unwrap();
+    let u = usage_from_json(&v).unwrap();
+    assert_eq!(u.cached_tokens, 7);
+
+    let v: serde_json::Value = serde_json::from_str(
+        r#"{"usage":{"input_tokens":10,"output_tokens":2,"cache_read_input_tokens":8,"cache_creation_input_tokens":3}}"#,
+    )
+    .unwrap();
+    let u = usage_from_json(&v).unwrap();
+    assert_eq!(u.cached_tokens, 8);
+    assert_eq!(u.cache_write_tokens, 3);
 }
 
 #[test]
@@ -53,7 +73,8 @@ fn sse_tap_handles_split_chunks_and_drops_usage_only_event() {
         tap.usage(),
         Usage {
             prompt_tokens: 2,
-            completion_tokens: 3
+            completion_tokens: 3,
+            ..Usage::default()
         }
     );
 }

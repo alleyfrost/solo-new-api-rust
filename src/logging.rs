@@ -4,8 +4,13 @@ use std::time::Duration;
 use sqlx::SqlitePool;
 use tokio::sync::mpsc;
 
+pub const LOG_TYPE_CONSUME: i64 = 2;
+pub const LOG_TYPE_ERROR: i64 = 5;
+
 #[derive(Debug, Clone)]
 pub struct LogEntry {
+    pub log_type: i64,
+    pub content: Option<String>,
     pub created_at: i64,
     pub user_id: i64,
     pub username: String,
@@ -79,10 +84,12 @@ async fn flush(pool: &SqlitePool, batch: &mut Vec<LogEntry>) {
             .or_insert(e.created_at);
         if let Err(err) = sqlx::query(
             "INSERT INTO logs (user_id,created_at,type,content,username,token_name,model_name,quota,prompt_tokens,completion_tokens,use_time,is_stream,channel_id,channel_name,token_id,`group`,ip,request_id,upstream_request_id,other) \
-             VALUES (?,?,2,NULL,?,?,?,0,?,?,?,?,?,?,?,?,?,?,?,?)",
+             VALUES (?,?,?,?,?,?,?,0,?,?,?,?,?,?,?,?,?,?,?,?)",
         )
         .bind(e.user_id)
         .bind(e.created_at)
+        .bind(e.log_type)
+        .bind(e.content)
         .bind(e.username)
         .bind(e.token_name)
         .bind(e.model_name)
@@ -120,11 +127,13 @@ async fn flush(pool: &SqlitePool, batch: &mut Vec<LogEntry>) {
 }
 
 pub async fn enqueue(state: &crate::state::AppState, entry: LogEntry) {
-    // 所有 LogEntry 都是消费日志（type=2），关掉开关就等于不落库；
-    // 令牌 accessed_time 随日志批一起更新，所以这里也一并停更。
-    let settings = crate::settings::Settings::load(state).await;
-    if !settings.log_consume_enabled {
-        return;
+    // 消费日志受开关控制；错误日志（type=5）始终落库，否则失败请求在
+    // 使用记录里完全不可见。
+    if entry.log_type == LOG_TYPE_CONSUME {
+        let settings = crate::settings::Settings::load(state).await;
+        if !settings.log_consume_enabled {
+            return;
+        }
     }
     let Some(tx) = &state.log_tx else {
         return;

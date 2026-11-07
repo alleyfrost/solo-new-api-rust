@@ -163,6 +163,8 @@ async fn real_db_schema_caches_and_token_models() {
 
     let writer = solo_new_api_rust::logging::spawn_writer(pool.clone(), rx);
     let entry = solo_new_api_rust::logging::LogEntry {
+        log_type: solo_new_api_rust::logging::LOG_TYPE_CONSUME,
+        content: None,
         created_at: 1_800_000_000,
         user_id: user.id,
         username: user.username.clone(),

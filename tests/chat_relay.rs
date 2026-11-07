@@ -302,6 +302,78 @@ async fn rate_limit_rotates_key_and_retries() {
 }
 
 #[tokio::test]
+async fn rate_limit_is_not_treated_as_channel_outage() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(
+            ResponseTemplate::new(429)
+                .insert_header("content-type", "application/json")
+                .set_body_string(r#"{"error":{"message":"inference exceeds tpm/rpm limit"}}"#),
+        )
+        .mount(&server)
+        .await;
+
+    let Fixture { app, pool, writer } = setup(&server.uri(), "k1", 1, None, None).await;
+    // 同一个进程内连续两次：若 429 把唯一 Key 冷却十分钟，第二次会变成 503。
+    for _ in 0..2 {
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/chat/completions")
+                    .header("authorization", "Bearer sk-abc123")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"model":"m1","messages":[]}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status().as_u16(), 429);
+        let body = res.into_body().collect().await.unwrap().to_bytes();
+        assert!(String::from_utf8_lossy(&body).contains("tpm/rpm limit"));
+    }
+    drop(app);
+    let _ = tokio::time::timeout(Duration::from_secs(3), writer).await;
+    // RetryTimes=3：每次请求 4 次上游尝试，两次请求都应真正打到上游。
+    assert_eq!(server.received_requests().await.unwrap().len(), 8);
+    let rows: (i64, String) = sqlx::query_as(
+        "SELECT COUNT(*), MAX(content) FROM logs WHERE type=5",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(rows.0, 2, "失败请求也应写入使用记录");
+    assert!(rows.1.contains("status_code=429"));
+}
+
+#[tokio::test]
+async fn cached_tokens_are_recorded_in_log_other() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "application/json")
+                .set_body_string(
+                    r#"{"id":"x","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"hi"}}],"usage":{"prompt_tokens":10,"completion_tokens":5,"prompt_tokens_details":{"cached_tokens":6}}}"#,
+                ),
+        )
+        .mount(&server)
+        .await;
+
+    let fixture = setup(&server.uri(), "sk-up", 1, None, None).await;
+    let (status, _, pool) = send(fixture, r#"{"model":"m1","messages":[]}"#).await;
+    assert_eq!(status, 200);
+    let other: String =
+        sqlx::query_scalar("SELECT other FROM logs WHERE type=2 ORDER BY id DESC LIMIT 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let v: serde_json::Value = serde_json::from_str(&other).unwrap();
+    assert_eq!(v["cache_tokens"], 6);
+}
+
+#[tokio::test]
 async fn client_error_is_not_retried_and_forwarded() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))

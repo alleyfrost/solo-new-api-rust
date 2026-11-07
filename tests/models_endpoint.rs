@@ -90,8 +90,8 @@ async fn list_models_filters_by_group_and_channel_status() {
         .header("authorization", "Bearer sk-abc123")).await;
     assert_eq!(status, 200);
     assert_eq!(v["success"], true);
-    assert_eq!(v["data"]["object"], "list");
-    let ids: Vec<&str> = v["data"]["data"].as_array().unwrap().iter()
+    assert_eq!(v["object"], "list");
+    let ids: Vec<&str> = v["data"].as_array().unwrap().iter()
         .map(|m| m["id"].as_str().unwrap()).collect();
     assert_eq!(ids, vec!["m1", "m2"]);
 }
@@ -102,10 +102,12 @@ async fn anthropic_headers_return_anthropic_shape() {
         .header("anthropic-version", "2023-06-01")
         .header("x-api-key", "sk-abc123")).await;
     assert_eq!(status, 200);
-    let data = v["data"]["data"].as_array().unwrap();
+    let data = v["data"].as_array().unwrap();
     assert_eq!(data.len(), 2);
     assert_eq!(data[0]["type"], "model");
-    assert_eq!(v["data"]["has_more"], false);
+    assert_eq!(v["has_more"], false);
+    assert_eq!(v["first_id"], "m1");
+    assert_eq!(v["last_id"], "m2");
 }
 
 #[tokio::test]
@@ -113,7 +115,7 @@ async fn model_limits_filter_to_allowed_list() {
     let (status, v) = get_models(Request::builder().uri("/v1/models")
         .header("authorization", "Bearer sk-limit1")).await;
     assert_eq!(status, 200);
-    let ids: Vec<&str> = v["data"]["data"].as_array().unwrap().iter()
+    let ids: Vec<&str> = v["data"].as_array().unwrap().iter()
         .map(|m| m["id"].as_str().unwrap()).collect();
     assert_eq!(ids, vec!["m2"]);
 }
@@ -123,8 +125,8 @@ async fn retrieve_model_returns_model_or_404() {
     let (status, v) = get_models(Request::builder().uri("/v1/models/m1")
         .header("authorization", "Bearer sk-abc123")).await;
     assert_eq!(status, 200);
-    assert_eq!(v["data"]["id"], "m1");
-    assert_eq!(v["data"]["object"], "model");
+    assert_eq!(v["id"], "m1");
+    assert_eq!(v["object"], "model");
 
     let (status, _) = get_models(Request::builder().uri("/v1/models/m3")
         .header("authorization", "Bearer sk-abc123")).await;

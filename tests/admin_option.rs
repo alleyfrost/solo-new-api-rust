@@ -473,6 +473,8 @@ async fn consume_switch_stops_writing_logs() {
     let writer = solo_new_api_rust::logging::spawn_writer(pool.clone(), rx);
 
     let entry = solo_new_api_rust::logging::LogEntry {
+        log_type: solo_new_api_rust::logging::LOG_TYPE_CONSUME,
+        content: None,
         created_at: now,
         user_id: 1,
         username: "root".into(),

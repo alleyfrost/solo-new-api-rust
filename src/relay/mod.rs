@@ -10,6 +10,8 @@ const MAX_EVENT: usize = 1024 * 1024;
 pub struct Usage {
     pub prompt_tokens: i64,
     pub completion_tokens: i64,
+    pub cached_tokens: i64,
+    pub cache_write_tokens: i64,
 }
 
 fn as_i64(v: &Value) -> Option<i64> {
@@ -28,10 +30,62 @@ pub fn usage_from_json(root: &Value) -> Option<Usage> {
         .and_then(as_i64)
         .or_else(|| u.get("output_tokens").and_then(as_i64))
         .unwrap_or(0);
+    let cached = u
+        .get("prompt_tokens_details")
+        .and_then(|d| d.get("cached_tokens"))
+        .and_then(as_i64)
+        .or_else(|| {
+            u.get("input_tokens_details")
+                .and_then(|d| d.get("cached_tokens"))
+                .and_then(as_i64)
+        })
+        .or_else(|| u.get("cache_read_input_tokens").and_then(as_i64))
+        .unwrap_or(0);
+    let cache_write = u
+        .get("cache_creation_input_tokens")
+        .and_then(as_i64)
+        .or_else(|| {
+            u.get("prompt_tokens_details")
+                .and_then(|d| d.get("cache_write_tokens"))
+                .and_then(as_i64)
+        })
+        .unwrap_or(0);
     Some(Usage {
         prompt_tokens: prompt,
         completion_tokens: completion,
+        cached_tokens: cached,
+        cache_write_tokens: cache_write,
     })
+}
+
+/// 写入 logs.other 的缓存命中字段，前端按 `cache_tokens` / `cache_creation_tokens` 展示。
+pub fn usage_other(usage: Usage) -> String {
+    let mut obj = serde_json::Map::new();
+    if usage.cached_tokens > 0 {
+        obj.insert("cache_tokens".into(), usage.cached_tokens.into());
+    }
+    if usage.cache_write_tokens > 0 {
+        obj.insert(
+            "cache_creation_tokens".into(),
+            usage.cache_write_tokens.into(),
+        );
+    }
+    if obj.is_empty() {
+        return "{}".to_string();
+    }
+    serde_json::to_string(&Value::Object(obj)).unwrap_or_else(|_| "{}".to_string())
+}
+
+pub fn upstream_error_message(bytes: &[u8]) -> String {
+    if let Ok(value) = serde_json::from_slice::<Value>(bytes)
+        && let Some(msg) = value
+            .pointer("/error/message")
+            .or_else(|| value.get("message"))
+            .and_then(Value::as_str)
+    {
+        return msg.to_string();
+    }
+    String::from_utf8_lossy(bytes).chars().take(200).collect()
 }
 
 /// 兼容 Anthropic 的 `message.usage` 与 Responses 的 `response.usage` 包装。
@@ -136,6 +190,9 @@ impl SseScanner {
         if let Some(u) = usage {
             self.usage.prompt_tokens = self.usage.prompt_tokens.max(u.prompt_tokens);
             self.usage.completion_tokens = self.usage.completion_tokens.max(u.completion_tokens);
+            self.usage.cached_tokens = self.usage.cached_tokens.max(u.cached_tokens);
+            self.usage.cache_write_tokens =
+                self.usage.cache_write_tokens.max(u.cache_write_tokens);
         }
     }
 
