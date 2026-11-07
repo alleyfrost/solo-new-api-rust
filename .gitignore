@@ -18,6 +18,9 @@ node_modules/
 # misc
 .DS_Store
 
+# private development docs (not open-sourced)
+/docs/dev/
+
 # deploy staging
 /deploy/context/
 /deploy/*.tar.gz

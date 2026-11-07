@@ -1,16 +1,21 @@
 # solo-new-api-rust
 
-用 Rust 重写的个人自用 [new-api](https://github.com/QuantumNous/new-api) 网关：**单用户、多 Token、直接复用现有 `one-api.db`**，可无缝替换现网 Go 版本。前端复用 new-api 的 React 代码并按单用户场景裁剪，后端仅手写认证、选路重试、管理 API、日志统计与静态服务。
+用 Rust 重写的轻量 [new-api](https://github.com/QuantumNous/new-api) 网关：**单用户、多 Token、直接复用现有 `one-api.db`**，可作为现成 new-api 部署的替代实现。前端复用 new-api 的 React 代码并按单用户场景裁剪，后端仅手写认证、选路重试、管理 API、日志统计与静态服务。
 
 - 与 new-api 的功能差异、未复刻项和独有改进见 [docs/VS-NEW-API.md](docs/VS-NEW-API.md)
-- 设计取舍、兼容性矩阵与逐轮验收记录见 [docs/REWRITE_SCOPE.md](docs/REWRITE_SCOPE.md)
-- 完整设计稿见 [docs/superpowers/specs/2026-11-06-solo-new-api-rust-design.md](docs/superpowers/specs/2026-11-06-solo-new-api-rust-design.md)
+- 对齐的上游版本与升级同步流程见 [docs/UPSTREAM.md](docs/UPSTREAM.md)
+- 内部设计、计划与逐轮验收记录保留在开发环境，不随开源仓库发布。
 
-## 状态（2026-11-07）
+## 状态
 
-- 功能开发完成，本地 Docker（`solo-new-api-rust:local`，:3006）验收通过。
-- **现网仍运行 Go 版 new-api**。2026-11-06 曾切换 34 分钟后按用户要求回退；上线需用户确认后另行执行。
+- 功能已实现，并通过本地 Docker 验收；尚未发布正式版本，接口与配置仍可能调整。
 - 本地门禁：`cargo test` 167 通过 / 1 忽略；前端 `bun run typecheck` 725 文件 0 错、`bun run test` 105 文件 1052 例。
+
+## 上游对齐版本
+
+- new-api：`e03439033238722c0b8d4437a052445f3aeeed83`（2026-11-06，`main`，`relaykit/v0.3.7-4-ge03439033`）
+- Switchyard：`c365efe832822541024704aadf6a0d5c81cc0528`（`switchyard-translation` 0.3.0，vendored）
+- 前端复制自 new-api `web/` 后裁剪改造；后端 `src/` 为独立实现。升级步骤、必须保留的改造点与门禁见 [docs/UPSTREAM.md](docs/UPSTREAM.md)。
 
 ## 定位
 
@@ -115,7 +120,7 @@ bash deploy/run-local.sh # 本地验收容器：:3006、--memory 450m、/tmp/sol
 
 `deploy/run-local.sh` 需要一份 new-api 数据库快照 `data/one-api-consistent.db`（不入库），或通过 `SNAPSHOT=/path/to.db` 指定；首次运行会复制到 `/tmp/solo-deploy-data/one-api.db`。做无上游验收时把渠道 `base_url` 指到本地 mock（例如 `http://host.docker.internal:3007`），不要打真实上游。
 
-部署到现网沿用原 Docker 服务约定：挂载 `./data:/data`、容器内端口 `3000`、`mem_limit 450m`、`wget` 健康检查。回滚方式是恢复切换前的 compose 文件与数据库备份，Go 镜像 `calciumion/new-api:v1.0.0-rc.47` 保留。
+部署到服务器时沿用原 Docker 服务约定：挂载 `./data:/data`、容器内端口 `3000`、`mem_limit 450m`、`wget` 健康检查。切换前备份数据库与原 compose/镜像；回滚即恢复备份并重启原服务。
 
 ## 目录
 
@@ -129,7 +134,7 @@ src/
   db.rs        SQLite 连接与 schema 校验
   settings.rs  options 白名单与校验
 web/           new-api React 前端 fork（裁剪 + 单用户改造）
-deploy/        交叉编译、打包、本地/线上运行脚本
+deploy/        交叉编译、打包、本地/服务器运行脚本
 tests/         集成测试（wiremock）
 vendor/        switchyard-translation（Apache-2.0，固定版本）
 ```
@@ -143,7 +148,7 @@ vendor/        switchyard-translation（Apache-2.0，固定版本）
 
 ## 已知限制
 
-- `param_override` 只保留数据，不参与请求改写（现网该字段为空）。
+- `param_override` 只保留数据，不参与请求改写（现有部署中该字段为空）。
 - `/api/perf-metrics/summary` 返回空结构，看板性能健康卡为空；`logs` 无法区分失败与零 token 请求，成功率不可诚实计算。
 - 管理端错误本地化只覆盖三条密钥错误，其余管理 API 错误仍显示英文原文。
 - 多 Key 轮询下标不落库，进程重启后从 0 开始；`quota_data`、用户 `used_quota/request_count` 不写。

@@ -4,7 +4,6 @@
 
 - 上游：new-api（Go，AGPL-3.0），前端 fork 锚点 `e03439033238722c0b8d4437a052445f3aeeed83`
 - 本项目：`solo-new-api-rust`（Rust，单用户自用裁剪版）
-- 详细兼容矩阵与逐轮验证见 [REWRITE_SCOPE.md](REWRITE_SCOPE.md)
 
 ## 一句话结论
 
@@ -78,11 +77,11 @@
 | 类别 | 具体项 | 原因 |
 | --- | --- | --- |
 | 多租户 | 注册、用户管理、用户额度、钱包 | 单用户 |
-| 认证扩展 | OAuth、邮箱验证、2FA、Passkey、RSA 登录加密 | 现网未用；TLS + argon2id 足够 |
+| 认证扩展 | OAuth、邮箱验证、2FA、Passkey、RSA 登录加密 | 本项目未使用；TLS + argon2id 足够 |
 | 计费 | 充值、订阅、兑换码、邀请、签到、额度扣减、分组倍率 | 只记用量不记金额 |
 | 存储中间件 | Redis、多节点同步、分布式锁 | 单实例进程内缓存 |
-| 任务与插件 | Midjourney、Task、Suno、视频、JS 插件、Realtime/Responses WebSocket | 现网未使用；依赖任务系统 |
-| 其他协议 | Gemini 原生 `/v1beta/*`、Files、Fine-tunes、`/v1/messages/count_tokens` | 现网未使用（`count_tokens` 现网本就 404，本项目保持 404） |
+| 任务与插件 | Midjourney、Task、Suno、视频、JS 插件、Realtime/Responses WebSocket | 本项目未使用；依赖任务系统 |
+| 其他协议 | Gemini 原生 `/v1beta/*`、Files、Fine-tunes、`/v1/messages/count_tokens` | 本项目未使用；`count_tokens` 与上游当前行为一致保持 404 |
 | 上游适配器 | Azure、Vertex、Bedrock、Gemini 等专用适配器 | 只保留 OpenAI 兼容 + Anthropic 直连 |
 | 渠道运维 | 上游模型自动同步、余额查询、Ollama 拉取、VLLM 状态、标签批量操作 | 依赖 Go 任务系统/Redis，管理页一并裁剪 |
 | 请求策略 | 参数覆盖执行、限流、敏感词、SSRF 防护、令牌数量上限 | `param_override` 只保留数据不生效；路由与重试沿用内置策略 |
@@ -105,15 +104,14 @@
 
 ## 兼容与迁移
 
-- **数据库**：直接使用现网 `one-api.db`；不建表、不改列、不迁移。切换前备份，回滚走原 compose + 旧镜像。
-- **Token**：现网 `sk-...` 无需更换；密钥格式与校验规则不变。
+- **数据库**：直接使用现有 `one-api.db`；不建表、不改列、不迁移。切换前备份数据库与原 compose/镜像。
+- **Token**：现有 `sk-...` 无需更换；密钥格式与校验规则不变。
 - **日志**：新写入按 Go 版可读的形状落 `logs`（`type=2`、`quota=0`、`request_id=req_*`、`other={}`），Go 版本回滚后列表与统计可读。
-- **已演练的回滚**：恢复 `docker-compose.yml.bak.rust-20261106` 与 `data/one-api.db.pre-rust-20261106`；`PRAGMA integrity_check` ok，39 张表列/索引与切换前零差异，Rust 期间增量日志 Go 侧读取正常。
-- **上线状态**：2026-11-06 曾切到 Rust 34 分钟后按用户要求回退；当前现网为 Go 版，Rust 仅在本地 Docker 验收。
+- **回滚方式**：恢复切换前的数据库备份与 compose/镜像，重新启动原 Go 服务。兼容性验收需确认：`PRAGMA integrity_check` 通过、表列与索引无差异、Rust 期间增量写入的日志可被 Go 版本读取。
 
 ## 已知行为差异与限制
 
-1. `param_override` 只做数据保留，转发时不应用（现网为空）。
+1. `param_override` 只做数据保留，转发时不应用（现有部署中该字段为空）。
 2. `/api/perf-metrics/summary` 返回 `{models: [], summary: {}}`，看板性能健康面板为空；`logs` 无法区分失败与零 token 请求，成功率与 TTFT 不做假数据。
 3. 管理端错误本地化只覆盖三条密钥错误，其余管理 API 错误仍显示英文原文（`message_key` 支持已具备，尚未逐个补齐）。
 4. 多 Key 轮询下标不落库，重启从 0 开始；`quota_data`、用户 `used_quota/request_count` 不更新（登录后个人资料的用量卡改为从 `logs` 统计）。
@@ -123,12 +121,12 @@
 8. 上游未返回 usage 时日志记 0，不做 token 估算。
 9. 单实例：不支持多节点共享缓存/轮询状态；进程重启会重新加载缓存。
 10. 前端仍保留 new-api 的部分英文 key 与管理端文案；7 个语言文件按本仓库实际用到的 key 维护。
-11. Token 的 `allow_ips` 只在管理页保存与回读，转发路径未做 IP 校验；上游 new-api 会按该字段拒绝请求，切换前需确认现网 Token 是否依赖它（如需强制，应在 `token_auth` 中补校验）。
+11. Token 的 `allow_ips` 只在管理页保存与回读，转发路径未做 IP 校验；上游 new-api 会按该字段拒绝请求。若现有 Token 依赖该字段，应在 `token_auth` 中补校验后再切换。
 
 ## 验证摘要（本地 Docker，2026-11-07）
 
-- 启动读现网快照、`/api/status`、SPA 回退、健康检查通过。
-- Token 认证：现网 `sk-` key 直接 200，错误 key 401。
+- 启动读现有库快照、`/api/status`、SPA 回退、健康检查通过。
+- Token 认证：现有库中的 `sk-` key 直接 200，错误 key 401。
 - 转发：非流式 usage 与日志正确；Chat 流式 2.69 MB / 4001 事件零缓冲；Anthropic/Responses 跨协议转换可用；24 路并发流式 24/24 完成、峰值 47.0 MiB 后回落；客户端断连后上游 0.09 s 内取消。
 - 限制：70 MB 请求返回 413（默认上限 32 MiB）。
 - 登录：12/12 并发成功、错误密码 6/6 401，内存 24.8 MiB。
@@ -137,6 +135,7 @@
 
 ## 上游与维护
 
-- new-api 源码锚点 `e03439033238722c0b8d4437a052445f3aeeed83`；前端 `web/` 以此为基线裁剪，后续升级需按文件比对而非直接覆盖。
+- 当前对齐 new-api `e03439033238722c0b8d4437a052445f3aeeed83`（2026-11-06，`main`，`relaykit/v0.3.7-4-ge03439033`）；前端 `web/` 以此为基线裁剪，后续升级按文件比对而非直接覆盖。
 - `switchyard-translation` 固定 0.3.0（Switchyard 锚点 `c365efe832822541024704aadf6a0d5c81cc0528`），以 vendored 形式放在 `vendor/`，升级时同步 golden 转换测试。
-- 兼容性任何改动都应先跑 `cargo test` 与本地 Docker 验收，再更新 [REWRITE_SCOPE.md](REWRITE_SCOPE.md) 的验收表。
+- 升级步骤、必须保留的本地改造与门禁清单见 [UPSTREAM.md](UPSTREAM.md)；升级完成后同时更新该文的对齐表与本节。
+- 兼容性任何改动都应先跑 `cargo test` 与本地 Docker 验收；内部验收表保留在开发环境，不随仓库发布。
