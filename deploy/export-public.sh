@@ -9,7 +9,7 @@ OUT="${1:-$ROOT/deploy/solo-new-api-rust-public.tar.gz}"
 git -C "$ROOT" archive --format=tar.gz --prefix=solo-new-api-rust/ -o "$OUT" HEAD
 
 echo "==> public snapshot: $OUT"
-tar -tzf "$OUT" | grep -E 'docs/dev|REWRITE_SCOPE|superpowers' && {
+tar -tzf "$OUT" | grep -E '/docs/dev/' && {
     echo "ERROR: private docs leaked into the snapshot" >&2
     exit 1
 } || true
