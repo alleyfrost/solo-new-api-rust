@@ -149,7 +149,7 @@ vendor/        switchyard-translation（Apache-2.0，固定版本）
 ## 已知限制
 
 - `param_override` 只保留数据，不参与请求改写（现有部署中该字段为空）。
-- `/api/perf-metrics/summary` 返回空结构，看板性能健康卡为空；`logs` 无法区分失败与零 token 请求，成功率不可诚实计算。
+- 性能健康按 `perf_metrics` 小时桶聚合（请求数、成功率、平均耗时、吞吐）；TTFT 未采集，头部延迟以总耗时近似。
 - 管理端错误本地化只覆盖三条密钥错误，其余管理 API 错误仍显示英文原文。
 - 多 Key 轮询下标不落库，进程重启后从 0 开始；`quota_data`、用户 `used_quota/request_count` 不写。
 - 生图桥接每个请求只取第一张图；上游响应超过 4 MiB 时日志 usage 记 0（客户端拿到的 usage 正确）。

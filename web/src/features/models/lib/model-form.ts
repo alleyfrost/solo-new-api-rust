@@ -37,8 +37,6 @@ export const modelFormSchema = z.object({
   vendor_id: z.number(),
   endpoints: z.string().default(''),
   name_rule: z.number().min(0).max(3).default(0),
-  status: z.boolean().default(true),
-  sync_official: z.boolean().default(true),
 })
 
 export type ModelFormValues = z.infer<typeof modelFormSchema>
@@ -51,8 +49,6 @@ export const MODEL_FORM_DEFAULT_VALUES: ModelFormValues = {
   vendor_id: 0,
   endpoints: '',
   name_rule: 0,
-  status: true,
-  sync_official: true,
 }
 
 // ============================================================================
@@ -72,8 +68,6 @@ export function transformModelToFormDefaults(model: Model): ModelFormValues {
     vendor_id: model.vendor_id ?? 0,
     endpoints: model.endpoints || '',
     name_rule: model.name_rule || 0,
-    status: model.status === 1,
-    sync_official: model.sync_official === 1,
   }
 }
 
@@ -92,8 +86,6 @@ export function transformFormDataToModelPayload(
     vendor_id: formData.vendor_id,
     endpoints: formData.endpoints || '',
     name_rule: formData.name_rule,
-    status: formData.status ? 1 : 0,
-    sync_official: formData.sync_official ? 1 : 0,
   }
 }
 

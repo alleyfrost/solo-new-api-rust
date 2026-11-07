@@ -21,7 +21,7 @@ import { describe, expect, test } from 'vitest'
 import type { QuotaDataItem } from '@/features/dashboard/types'
 import type { TimeGranularity } from '@/lib/time'
 
-import { processChartData, processUserChartData } from '../charts'
+import { processChartData } from '../charts'
 
 const cases: Array<{
   granularity: TimeGranularity
@@ -121,20 +121,6 @@ describe.each(cases)('dashboard $granularity chart chronology', (scenario) => {
         )
       ).toEqual([11, 2, 3, 4, 5, 6, 7, 8])
     }
-    expect(data).toEqual(original)
-  })
-
-  test('orders user buckets across New Year while aggregating repeated labels', () => {
-    const data = unorderedUsage(scenario.start, scenario.interval)
-    const original = structuredClone(data)
-    const result = processUserChartData(data, scenario.granularity)
-    const values: Array<{ Time: string; rawTokens: number }> =
-      result.spec_user_trend.data[0].values
-
-    expect(values.map((row) => row.Time)).toEqual(scenario.labels)
-    expect(values.map((row) => row.rawTokens)).toEqual([
-      11, 2, 3, 4, 5, 6, 7, 8,
-    ])
     expect(data).toEqual(original)
   })
 

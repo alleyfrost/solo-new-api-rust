@@ -64,6 +64,38 @@ pub fn spawn_writer(
     })
 }
 
+/// 按小时桶累计性能指标，供数据看板的“性能健康”读取。
+async fn record_perf(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, e: &LogEntry) {
+    if e.model_name.is_empty() {
+        return;
+    }
+    let bucket = e.created_at / 3600 * 3600;
+    let success = i64::from(e.log_type == LOG_TYPE_CONSUME);
+    let latency_ms = e.use_time_secs.max(0) * 1000;
+    if let Err(err) = sqlx::query(
+        "INSERT INTO perf_metrics (model_name, `group`, bucket_ts, request_count, success_count, total_latency_ms, ttft_sum_ms, ttft_count, output_tokens, generation_ms) \
+         VALUES (?,?,?,1,?,?,0,0,?,?) \
+         ON CONFLICT(model_name,`group`,bucket_ts) DO UPDATE SET \
+           request_count = perf_metrics.request_count + 1, \
+           success_count = perf_metrics.success_count + excluded.success_count, \
+           total_latency_ms = perf_metrics.total_latency_ms + excluded.total_latency_ms, \
+           output_tokens = perf_metrics.output_tokens + excluded.output_tokens, \
+           generation_ms = perf_metrics.generation_ms + excluded.generation_ms",
+    )
+    .bind(&e.model_name)
+    .bind(&e.group)
+    .bind(bucket)
+    .bind(success)
+    .bind(latency_ms)
+    .bind(e.completion_tokens)
+    .bind(latency_ms)
+    .execute(&mut **tx)
+    .await
+    {
+        tracing::debug!("perf metrics upsert failed: {err}");
+    }
+}
+
 async fn flush(pool: &SqlitePool, batch: &mut Vec<LogEntry>) {
     if batch.is_empty() {
         return;
@@ -82,6 +114,7 @@ async fn flush(pool: &SqlitePool, batch: &mut Vec<LogEntry>) {
             .entry(e.token_id)
             .and_modify(|t| *t = (*t).max(e.created_at))
             .or_insert(e.created_at);
+        record_perf(&mut tx, &e).await;
         if let Err(err) = sqlx::query(
             "INSERT INTO logs (user_id,created_at,type,content,username,token_name,model_name,quota,prompt_tokens,completion_tokens,use_time,is_stream,channel_id,channel_name,token_id,`group`,ip,request_id,upstream_request_id,other) \
              VALUES (?,?,?,?,?,?,?,0,?,?,?,?,?,?,?,?,?,?,?,?)",

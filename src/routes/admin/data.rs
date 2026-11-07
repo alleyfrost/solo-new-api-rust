@@ -46,6 +46,8 @@ async fn grouped(
     let mut sql = String::from(
         "SELECT created_at/86400*86400 AS day, COALESCE(model_name,'') AS model_name, COALESCE(username,'') AS username, \
          COALESCE(SUM(prompt_tokens),0)+COALESCE(SUM(completion_tokens),0) AS token_used, \
+         COALESCE(SUM(CASE WHEN json_valid(other) THEN json_extract(other,'$.cache_tokens') END),0) AS cache_read_tokens, \
+         COALESCE(SUM(CASE WHEN json_valid(other) THEN json_extract(other,'$.cache_creation_tokens') END),0) AS cache_creation_tokens, \
          COUNT(*) AS count, COALESCE(SUM(quota),0) AS quota FROM logs \
          WHERE type=2 AND created_at>=? AND created_at<=? \
          AND (?=0 OR user_id=?) AND (?='' OR username=?)",
@@ -74,6 +76,8 @@ async fn grouped(
                 "model_name": row.get::<String, _>("model_name"),
                 "username": row.get::<String, _>("username"),
                 "token_used": row.get::<i64, _>("token_used"),
+                "cache_read_tokens": row.get::<i64, _>("cache_read_tokens"),
+                "cache_creation_tokens": row.get::<i64, _>("cache_creation_tokens"),
                 "count": row.get::<i64, _>("count"),
                 "quota": row.get::<i64, _>("quota"),
             })

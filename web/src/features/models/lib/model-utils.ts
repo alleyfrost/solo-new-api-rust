@@ -166,20 +166,6 @@ export function validateEndpointsJSON(endpoints: string): boolean {
 // Model Status Utils
 // ============================================================================
 
-/**
- * Check if model is enabled
- */
-export function isModelEnabled(model: Model): boolean {
-  return model.status === 1
-}
-
-/**
- * Check if model syncs with official
- */
-export function isModelSyncOfficial(model: Model): boolean {
-  return model.sync_official === 1
-}
-
 // Keep table labels compact; the drawer and tooltip share the full explanation.
 export function getModelChannelState(model: Model) {
   const available = model.bound_channels?.length ?? 0
@@ -193,20 +179,18 @@ export function getModelChannelState(model: Model) {
     }
     return {
       label: 'Metadata only',
-      description:
-        'No channel is configured. This model will not appear in the model square.',
+      description: 'No channel is configured for this model.',
     }
   }
   if (available === 0) {
     return {
       label: 'No available channels',
-      description:
-        'No channel is currently available. This model will not appear in the model square.',
+      description: 'No channel is currently available for this model.',
     }
   }
   return {
     label: 'Available channels: {{count}}',
     description:
-      'Listing also depends on metadata visibility and the user’s group access.',
+      'Calls to this model use the bound channels and your group access.',
   }
 }

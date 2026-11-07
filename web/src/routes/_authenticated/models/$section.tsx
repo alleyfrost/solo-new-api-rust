@@ -32,12 +32,6 @@ const modelsSearchSchema = z.object({
   pageSize: z.number().optional().catch(10),
   filter: z.string().optional().catch(''),
   vendor: z.array(z.string()).optional().catch([]),
-  status: z.array(z.string()).optional().catch([]),
-  square_state: z
-    .array(z.enum(['visible', 'unavailable', 'hidden', 'partial']))
-    .optional()
-    .catch([]),
-  sync: z.array(z.string()).optional().catch([]),
 })
 
 export const Route = createFileRoute('/_authenticated/models/$section')({

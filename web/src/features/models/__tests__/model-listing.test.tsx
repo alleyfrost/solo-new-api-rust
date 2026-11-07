@@ -151,18 +151,11 @@ afterEach(async () => {
   await i18n.changeLanguage('en')
 })
 
-it('requests channel models and distinguishes catalog policy from availability using compact labels', async () => {
+it('requests channel models and labels channel availability without a marketplace view', async () => {
   const { get } = await renderList()
   expect(get).toHaveBeenCalledWith('/api/models/', {
     params: expect.objectContaining({ include_channel_models: true }),
   })
-  expect(screen.getAllByText('Unavailable')).toHaveLength(3)
-  const warning = screen
-    .getAllByText('Unavailable')[0]
-    .closest('[data-slot="status-badge"]')
-  expect(warning).toHaveClass('text-warning')
-  expect(warning?.querySelector('svg')).toBeInTheDocument()
-  expect(warning).not.toHaveClass('text-success')
   expect(screen.getAllByText('Missing metadata')).toHaveLength(2)
   expect(screen.getAllByText('Channels 0 · Groups 0')).toHaveLength(3)
   expect(
@@ -170,35 +163,6 @@ it('requests channel models and distinguishes catalog policy from availability u
       'No channel is configured. This model will not appear in the model square.'
     )
   ).not.toBeInTheDocument()
-  const user = userEvent.setup()
-  const trigger = screen.getAllByRole('button', {
-    name: 'Unavailable',
-  })[0]
-  expect(trigger).toHaveAttribute(
-    'title',
-    'No channel is configured. This model will not appear in the model square.'
-  )
-  await user.click(trigger)
-  expect(
-    await screen.findByRole('dialog', { name: 'Unavailable' })
-  ).toHaveTextContent(
-    'No channel is configured. This model will not appear in the model square.'
-  )
-  expect(trigger).toHaveAttribute('aria-expanded', 'true')
-  await user.keyboard('{Escape}')
-  await waitFor(() =>
-    expect(
-      screen.queryByRole('dialog', { name: 'Unavailable' })
-    ).not.toBeInTheDocument()
-  )
-  expect(trigger).toHaveFocus()
-  await user.click(screen.getByRole('button', { name: 'catalog-only' }))
-  await user.click(screen.getByRole('tab', { name: 'Channels and groups' }))
-  expect(
-    screen.getByText(
-      'No channel is configured. This model will not appear in the model square.'
-    )
-  ).toBeVisible()
 })
 
 it('keeps channel rows individually selectable and disables metadata mutations for mixed selection', async () => {
@@ -220,13 +184,9 @@ it('keeps channel rows individually selectable and disables metadata mutations f
     screen.getByRole('checkbox', { name: 'Select channel-only' })
   ).toBeChecked()
   const toolbar = screen.getByRole('toolbar', { name: /Bulk actions/ })
-  for (const name of [
-    'Show selected models in model square',
-    'Hide selected models from model square',
-    'Delete selected models',
-  ]) {
-    expect(within(toolbar).getByRole('button', { name })).toBeDisabled()
-  }
+  expect(
+    within(toolbar).getByRole('button', { name: 'Delete selected models' })
+  ).toBeDisabled()
   expect(
     within(toolbar).getByRole('button', { name: 'Copy model names' })
   ).toBeEnabled()
@@ -243,7 +203,7 @@ it('keeps long model names and translated channel labels truncated inside their 
     'provider/very-long-channel-model-with-detailed-version-and-context-window'
   await renderList([
     { ...channel, model_name: longName },
-    { ...metadata, status: 0, square_state: 'hidden' },
+    { ...metadata, status: 0 },
   ])
   expect(screen.getByText(longName)).toHaveClass('truncate')
   expect(screen.getByText('Add metadata')).toHaveClass('truncate')
@@ -262,7 +222,6 @@ it('keeps long model names and translated channel labels truncated inside their 
     await i18n.changeLanguage('zhCN')
   })
   expect(screen.getByText('缺元数据')).toBeVisible()
-  expect(screen.getByText('已隐藏')).toBeVisible()
   expect(screen.getAllByText('渠道 0 · 分组 0')).toHaveLength(2)
 })
 
@@ -297,220 +256,6 @@ it('keeps channel explanations readable in the mobile card and detail drawer', a
   expect(screen.getByText('Channels 0 · Groups 0')).toHaveClass(
     'whitespace-normal'
   )
-  const user = userEvent.setup()
-  await user.click(screen.getByRole('button', { name: 'catalog-only' }))
-  await user.click(screen.getByRole('tab', { name: 'Channels and groups' }))
-  expect(
-    screen.getByText(
-      'No channel is configured. This model will not appear in the model square.'
-    )
-  ).toBeVisible()
-})
-
-it('uses backend square states for success, warning, hidden, and partial rows including models without metadata', async () => {
-  const activeChannels = [{ name: 'Active', type: 1 }]
-  await renderList([
-    { ...metadata, model_name: 'catalog-only' },
-    {
-      ...metadata,
-      id: 8,
-      model_name: 'enabled-model',
-      square_state: 'visible',
-      configured_channel_count: 1,
-      bound_channels: activeChannels,
-    },
-    {
-      ...metadata,
-      id: 9,
-      model_name: 'hidden-model',
-      status: 0,
-      square_state: 'hidden',
-      configured_channel_count: 1,
-      bound_channels: activeChannels,
-    },
-    {
-      ...metadata,
-      id: 10,
-      model_name: 'partial-rule-',
-      name_rule: 1,
-      square_state: 'partial',
-      configured_channel_count: 2,
-      bound_channels: activeChannels,
-    },
-    {
-      ...channel,
-      model_name: 'bare-visible',
-      square_state: 'visible',
-      bound_channels: activeChannels,
-    },
-    {
-      ...channel,
-      model_name: 'bare-hidden-by-rule',
-      square_state: 'hidden',
-      bound_channels: activeChannels,
-    },
-  ])
-  expect(screen.getByRole('button', { name: 'Display policy' })).toBeVisible()
-  for (const label of ['Unavailable', 'Partly shown']) {
-    const badge = screen.getByText(label).closest('[data-slot="status-badge"]')
-    expect(badge).toHaveClass('text-warning')
-    expect(badge?.querySelector('svg')).toBeInTheDocument()
-    expect(badge).not.toHaveClass('text-success')
-  }
-  const displayed = screen.getAllByText('Displayed')
-  expect(displayed).toHaveLength(2)
-  for (const label of displayed) {
-    expect(label.closest('[data-slot="status-badge"]')).toHaveClass(
-      'text-success'
-    )
-  }
-  const hidden = screen.getAllByText('Listing hidden')
-  expect(hidden).toHaveLength(2)
-  for (const label of hidden) {
-    expect(label.closest('[data-slot="status-badge"]')).toHaveClass(
-      'text-muted-foreground'
-    )
-  }
-  await act(async () => {
-    await i18n.changeLanguage('zhCN')
-  })
-  expect(screen.getByText('无法展示')).toBeVisible()
-  expect(screen.getByText('部分展示')).toBeVisible()
-  expect(screen.getAllByText('正常展示')).toHaveLength(2)
-  expect(screen.getAllByText('已隐藏')).toHaveLength(2)
-  for (const label of ['无法展示', '部分展示']) {
-    expect(screen.getByText(label)).toHaveClass('truncate')
-  }
-})
-
-it.each(['{Enter}', ' '])(
-  'opens the reason with %s and returns focus to the status after Escape',
-  async (key) => {
-    await renderList([metadata])
-    const user = userEvent.setup()
-    const trigger = screen.getByRole('button', {
-      name: 'Unavailable',
-    })
-    act(() => trigger.focus())
-    await user.keyboard(key)
-    expect(
-      await screen.findByRole('dialog', { name: 'Unavailable' })
-    ).toHaveTextContent('No channel is configured.')
-    await user.keyboard('{Escape}')
-    await waitFor(() =>
-      expect(trigger).toHaveAttribute('aria-expanded', 'false')
-    )
-    expect(trigger).toHaveFocus()
-  }
-)
-
-it('opens the warning icon’s own model reason and closes it on an outside click without selecting the row', async () => {
-  await renderList([metadata, channel])
-  const user = userEvent.setup()
-  const triggers = screen.getAllByRole('button', {
-    name: 'Unavailable',
-  })
-  const icon = triggers[1].querySelector('svg')
-  expect(icon).not.toBeNull()
-  await user.click(icon as SVGElement)
-  const popup = await screen.findByRole('dialog', { name: 'Unavailable' })
-  expect(popup).toHaveTextContent('No channel is currently available.')
-  expect(popup).not.toHaveTextContent('No channel is configured.')
-  expect(
-    screen.getByRole('checkbox', { name: 'Select channel-only' })
-  ).not.toBeChecked()
-  await user.click(screen.getByPlaceholderText('Filter by model name...'))
-  await waitFor(() =>
-    expect(
-      screen.queryByRole('dialog', { name: 'Unavailable' })
-    ).not.toBeInTheDocument()
-  )
-  expect(triggers[1]).toHaveAttribute('aria-expanded', 'false')
-  await user.click(triggers[0])
-  expect(
-    await screen.findByRole('dialog', { name: 'Unavailable' })
-  ).toHaveTextContent('No channel is configured.')
-})
-
-it('opens a long translated reason by touch in the mobile card without requiring the detail drawer', async () => {
-  const originalMatchMedia = window.matchMedia
-  vi.spyOn(window, 'matchMedia').mockImplementation((query) => ({
-    ...originalMatchMedia(query),
-    matches: query === '(max-width: 640px)',
-  }))
-  await renderList([metadata])
-  await act(async () => {
-    await i18n.changeLanguage('fr')
-  })
-  const user = userEvent.setup()
-  const trigger = screen.getByRole('button', {
-    name: i18n.t('Unavailable'),
-  })
-  await user.pointer([
-    { keys: '[TouchA>]', target: trigger },
-    { keys: '[/TouchA]' },
-  ])
-  const popup = await screen.findByRole('dialog', {
-    name: i18n.t('Unavailable'),
-  })
-  expect(popup).toHaveTextContent(
-    i18n.t(
-      'No channel is configured. This model will not appear in the model square.'
-    )
-  )
-  expect(popup).toHaveClass('whitespace-normal', 'break-words')
-  expect(popup).toHaveClass('max-w-[calc(100vw-2rem)]')
-  expect(
-    screen.queryByRole('dialog', { name: metadata.model_name })
-  ).not.toBeInTheDocument()
-})
-
-it('filters actual visibility independently of policy and restores filters through browser history', async () => {
-  const { get, router } = await renderList([channel], {
-    initialUrl: '/models/metadata?page=3&status=%5B%22enabled%22%5D',
-    total: 100,
-  })
-  const user = userEvent.setup()
-  await user.click(
-    screen.getByRole('button', { name: 'Model square visibility' })
-  )
-  await user.click(screen.getByRole('option', { name: 'Partly shown' }))
-  await waitFor(() =>
-    expect(get).toHaveBeenCalledWith('/api/models/search', {
-      params: expect.objectContaining({
-        status: 'enabled',
-        square_state: 'partial',
-        p: 1,
-      }),
-    })
-  )
-  expect(router.state.location.search).toMatchObject({
-    status: ['enabled'],
-    square_state: ['partial'],
-  })
-  await user.keyboard('{Escape}')
-  await act(async () => {
-    router.history.back()
-  })
-  await waitFor(() =>
-    expect(router.state.location.search).not.toHaveProperty('square_state')
-  )
-  await act(async () => {
-    router.history.forward()
-  })
-  await waitFor(() =>
-    expect(router.state.location.search).toMatchObject({
-      square_state: ['partial'],
-    })
-  )
-  await user.click(
-    screen.getByRole('button', { name: /Model square visibility/ })
-  )
-  await user.click(screen.getByRole('option', { name: 'Clear filters' }))
-  await waitFor(() =>
-    expect(router.state.location.search).not.toHaveProperty('square_state')
-  )
-  expect(router.state.location.search).toMatchObject({ status: ['enabled'] })
 })
 
 it('keeps all columns while collapsing tags and connection counts', async () => {
@@ -523,27 +268,17 @@ it('keeps all columns while collapsing tags and connection counts', async () => 
     },
   ])
   expect(screen.getByText('Channels 1 · Groups 2')).toBeVisible()
-  expect(
-    screen.getByRole('columnheader', { name: 'Sync policy' })
-  ).toBeVisible()
+  for (const name of [
+    'Display policy',
+    'Model square visibility',
+    'Sync policy',
+  ]) {
+    expect(screen.queryByRole('columnheader', { name })).not.toBeInTheDocument()
+  }
   expect(screen.getByRole('columnheader', { name: 'Tags' })).toBeVisible()
   expect(screen.getByText('Tools')).toBeVisible()
   expect(screen.queryByText('Files')).not.toBeInTheDocument()
   await userEvent.click(screen.getByRole('button', { name: 'Show all tags' }))
   expect(await screen.findByText('Files')).toBeVisible()
   expect(screen.getByText('Vision')).toBeVisible()
-})
-
-it('keeps an active visibility filter when its server result is empty', async () => {
-  const { get } = await renderList([], {
-    initialUrl: '/models/metadata?square_state=%5B%22unavailable%22%5D',
-  })
-  expect(screen.getByText('No Models Found')).toBeVisible()
-  expect(screen.getByText('Try adjusting your search')).toBeVisible()
-  expect(
-    screen.getByRole('button', { name: /Model square visibility.*Unavailable/ })
-  ).toBeVisible()
-  expect(get).toHaveBeenCalledWith('/api/models/search', {
-    params: expect.objectContaining({ square_state: 'unavailable', p: 1 }),
-  })
 })

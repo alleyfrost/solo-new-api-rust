@@ -23,7 +23,6 @@ import { useTranslation } from 'react-i18next'
 import { DateTimePicker } from '@/components/datetime-picker'
 import { Dialog } from '@/components/dialog'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
@@ -48,7 +47,6 @@ import type {
 } from '@/features/dashboard/types'
 import { getRollingDateRange, type TimeGranularity } from '@/lib/time'
 import { cn } from '@/lib/utils'
-import { useAuthStore } from '@/stores/auth-store'
 
 interface ModelsFilterProps {
   preferences: DashboardChartPreferences
@@ -99,8 +97,6 @@ const SectionDivider = ({ label }: { label: string }) => (
 export function ModelsFilter(props: ModelsFilterProps) {
   const { t } = useTranslation()
   // 使用已缓存的用户数据，避免重复调用 API
-  const user = useAuthStore((state) => state.auth.user)
-  const isAdmin = user?.role && user.role >= 10
 
   const [open, setOpen] = useState(false)
   const [filters, setFilters] = useState<DashboardFilters>(
@@ -282,23 +278,6 @@ export function ModelsFilter(props: ModelsFilterProps) {
               </SelectContent>
             </Select>
           </div>
-
-          {/* Admin-only fields */}
-          {isAdmin && (
-            <>
-              <SectionDivider label={t('Admin Only')} />
-
-              <div className='grid gap-2'>
-                <Label htmlFor='username'>{t('Username')}</Label>
-                <Input
-                  id='username'
-                  placeholder={t('Filter by username')}
-                  value={filters.username}
-                  onChange={(e) => handleChange('username', e.target.value)}
-                />
-              </div>
-            </>
-          )}
         </div>
       </ScrollArea>
     </Dialog>

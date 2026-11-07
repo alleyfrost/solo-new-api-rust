@@ -87,7 +87,11 @@ function renderDrawer(
   render(
     <QueryClientProvider client={client}>
       <ModelsProvider>
-        <ModelMutateDrawer open onOpenChange={onClose} currentRow={currentRow} />
+        <ModelMutateDrawer
+          open
+          onOpenChange={onClose}
+          currentRow={currentRow}
+        />
       </ModelsProvider>
     </QueryClientProvider>
   )
@@ -114,7 +118,7 @@ function mockReferenceData(
 }
 
 describe('row actions', () => {
-  it('offers edit, visibility toggle and delete without a pricing entry', async () => {
+  it('offers edit and delete without a pricing entry', async () => {
     mockReferenceData(() => undefined)
     renderModelActions()
     const user = userEvent.setup()
@@ -123,9 +127,6 @@ describe('row actions', () => {
       screen.queryByRole('button', { name: 'Pricing' })
     ).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Open menu' }))
-    expect(
-      await screen.findByRole('menuitem', { name: 'Hide from model square' })
-    ).toBeVisible()
     expect(screen.getByRole('menuitem', { name: 'Delete' })).toBeVisible()
   })
 
@@ -142,9 +143,7 @@ describe('row actions', () => {
 describe('metadata editing', () => {
   it('limits the editor to the metadata and connections tabs', async () => {
     mockReferenceData((url) =>
-      url === '/api/models/7'
-        ? { success: true, data: model }
-        : undefined
+      url === '/api/models/7' ? { success: true, data: model } : undefined
     )
     renderDrawer(model)
     await screen.findByLabelText('Description')
@@ -375,37 +374,6 @@ describe('metadata editing', () => {
       model_name: 'example-model',
       vendor_id: 4,
       endpoints: '',
-      status: 1,
-      sync_official: 1,
-    })
-  })
-
-  it('writes the display policy and sync policy switches back to the server', async () => {
-    mockReferenceData((url) =>
-      url === '/api/models/7' ? { success: true, data: model } : undefined
-    )
-    const put = vi
-      .spyOn(api, 'put')
-      .mockResolvedValue({ data: { success: true, data: model } })
-    renderDrawer(model)
-    await screen.findByLabelText('Description')
-    const user = userEvent.setup()
-    expect(
-      screen.getByRole('switch', { name: 'Model square visibility' })
-    ).toBeChecked()
-    expect(
-      screen.getByRole('switch', { name: 'Allow metadata sync' })
-    ).toBeChecked()
-    await user.click(
-      screen.getByRole('switch', { name: 'Model square visibility' })
-    )
-    await user.click(screen.getByRole('switch', { name: 'Allow metadata sync' }))
-    await user.click(screen.getByRole('button', { name: 'Save metadata' }))
-    await waitFor(() => expect(put).toHaveBeenCalled())
-    expect(put.mock.calls[0][1]).toMatchObject({
-      id: 7,
-      status: 0,
-      sync_official: 0,
     })
   })
 })

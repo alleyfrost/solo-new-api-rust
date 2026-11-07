@@ -185,14 +185,6 @@ export interface DashboardChartPreferences {
   defaultTimeGranularity: TimeGranularity
 }
 
-// User analytics selections are held by the dashboard parent so they survive
-// switching between dashboard sub-sections, matching the model/flow filters.
-export interface UserChartsFilters {
-  timeGranularity: TimeGranularity
-  selectedRange: number
-  topUserLimit: number
-}
-
 // ============================================================================
 // API Info Types
 // ============================================================================
@@ -219,9 +211,4 @@ export interface ProcessedChartData {
   spec_rank_bar: VChartSpec
   totalTokensDisplay: string
   totalCountDisplay: string
-}
-
-export interface ProcessedUserChartData {
-  spec_user_rank: VChartSpec
-  spec_user_trend: VChartSpec
 }

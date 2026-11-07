@@ -2,6 +2,8 @@
 async fn batch_writer_inserts_consume_logs() {
     let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
     sqlx::query("CREATE TABLE logs (id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,created_at INTEGER,type INTEGER,content TEXT,username TEXT,token_name TEXT,model_name TEXT,quota INTEGER,prompt_tokens INTEGER,completion_tokens INTEGER,use_time INTEGER,is_stream NUMERIC,channel_id INTEGER,channel_name TEXT,token_id INTEGER,`group` TEXT,ip TEXT,request_id TEXT,upstream_request_id TEXT,other TEXT)").execute(&pool).await.unwrap();
+    sqlx::query("CREATE TABLE perf_metrics (id INTEGER PRIMARY KEY AUTOINCREMENT,model_name TEXT,`group` TEXT,bucket_ts INTEGER,request_count INTEGER DEFAULT 0,success_count INTEGER DEFAULT 0,total_latency_ms INTEGER DEFAULT 0,ttft_sum_ms INTEGER DEFAULT 0,ttft_count INTEGER DEFAULT 0,output_tokens INTEGER DEFAULT 0,generation_ms INTEGER DEFAULT 0)").execute(&pool).await.unwrap();
+    sqlx::query("CREATE UNIQUE INDEX idx_perf_model_group_bucket ON perf_metrics (model_name,`group`,bucket_ts)").execute(&pool).await.unwrap();
     sqlx::query("CREATE TABLE tokens (id INTEGER PRIMARY KEY, accessed_time INTEGER)")
         .execute(&pool)
         .await
@@ -50,4 +52,11 @@ async fn batch_writer_inserts_consume_logs() {
         .await
         .unwrap();
     assert_eq!(accessed, 101);
+    let perf: (i64, i64, i64, i64) = sqlx::query_as(
+        "SELECT SUM(request_count), SUM(success_count), SUM(output_tokens), SUM(generation_ms) FROM perf_metrics",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(perf, (2, 2, 10, 2000));
 }

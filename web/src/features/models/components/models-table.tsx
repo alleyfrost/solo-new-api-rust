@@ -33,7 +33,6 @@ import {
 import { getModels, searchModels, getVendors } from '../api'
 import { DEFAULT_PAGE_SIZE } from '../constants'
 import { modelsQueryKeys, vendorsQueryKeys } from '../lib'
-import type { ModelSquareState } from '../types'
 import { DataTableBulkActions } from './data-table-bulk-actions'
 import { useModelsColumns } from './models-columns'
 
@@ -61,26 +60,13 @@ export function ModelsTable() {
     },
     globalFilter: { enabled: true, key: 'filter' },
     columnFilters: [
-      { columnId: 'status', searchKey: 'status', type: 'array' },
-      { columnId: 'square_state', searchKey: 'square_state', type: 'array' },
       { columnId: 'vendor_id', searchKey: 'vendor', type: 'array' },
-      { columnId: 'sync_official', searchKey: 'sync', type: 'array' },
     ],
   })
 
   // Extract filters from column filters
-  const statusFilter =
-    (columnFilters.find((f) => f.id === 'status')?.value as string[]) || []
-  const squareState = (
-    columnFilters.find((f) => f.id === 'square_state')?.value as
-      | ModelSquareState[]
-      | undefined
-  )?.[0]
   const vendorFilter =
     (columnFilters.find((f) => f.id === 'vendor_id')?.value as string[]) || []
-  const syncFilter =
-    (columnFilters.find((f) => f.id === 'sync_official')?.value as string[]) ||
-    []
 
   // Fetch vendors for filter
   const { data: vendorsData } = useQuery({
@@ -107,23 +93,8 @@ export function ModelsTable() {
       ? vendorFilter[0]
       : undefined
 
-  const statusFilterValue =
-    statusFilter.length > 0 && !statusFilter.includes('all')
-      ? statusFilter[0]
-      : undefined
-  const syncFilterValue =
-    syncFilter.length > 0 && !syncFilter.includes('all')
-      ? syncFilter[0]
-      : undefined
-
-  // Use search API whenever any filter is active so status/sync are applied server-side
-  const shouldSearch = Boolean(
-    globalFilter?.trim() ||
-    activeVendorFilter ||
-    statusFilterValue ||
-    squareState ||
-    syncFilterValue
-  )
+  // Use search API whenever a text or vendor filter is active.
+  const shouldSearch = Boolean(globalFilter?.trim() || activeVendorFilter)
 
   // Fetch models data
   // eslint-disable-next-line @tanstack/query/exhaustive-deps
@@ -132,9 +103,6 @@ export function ModelsTable() {
       include_channel_models: true,
       keyword: globalFilter,
       vendor: activeVendorFilter,
-      status: statusFilterValue,
-      square_state: squareState,
-      sync_official: syncFilterValue,
       p: pagination.pageIndex + 1,
       page_size: pagination.pageSize,
     }),
@@ -145,9 +113,6 @@ export function ModelsTable() {
             include_channel_models: true,
             keyword: globalFilter,
             vendor: activeVendorFilter,
-            status: statusFilterValue,
-            square_state: squareState,
-            sync_official: syncFilterValue,
             p: pagination.pageIndex + 1,
             page_size: pagination.pageSize,
           })
@@ -245,38 +210,9 @@ export function ModelsTable() {
         searchDebounceMs: 500,
         filters: [
           {
-            columnId: 'status',
-            title: t('Display policy'),
-            options: [
-              { label: t('Allowed'), value: 'enabled' },
-              { label: t('Not listed'), value: 'disabled' },
-            ],
-            singleSelect: true,
-          },
-          {
-            columnId: 'square_state',
-            title: t('Model square visibility'),
-            options: [
-              { label: t('Displayed'), value: 'visible' },
-              { label: t('Unavailable'), value: 'unavailable' },
-              { label: t('Listing hidden'), value: 'hidden' },
-              { label: t('Partly shown'), value: 'partial' },
-            ],
-            singleSelect: true,
-          },
-          {
             columnId: 'vendor_id',
             title: t('Vendor'),
             options: vendorFilterOptions,
-            singleSelect: true,
-          },
-          {
-            columnId: 'sync_official',
-            title: t('Sync policy'),
-            options: [
-              { label: t('Allow updates'), value: 'yes' },
-              { label: t('Keep local'), value: 'no' },
-            ],
             singleSelect: true,
           },
         ],

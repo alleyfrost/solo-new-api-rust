@@ -15,6 +15,7 @@ async fn setup() -> (Router, SqlitePool, i64) {
     sqlx::query("CREATE TABLE channels (id INTEGER PRIMARY KEY, type INTEGER, `key` TEXT, status INTEGER, name TEXT, models TEXT, `group` TEXT, base_url TEXT, priority INTEGER, weight INTEGER, channel_info TEXT, model_mapping TEXT, header_override TEXT, created_time INTEGER, test_time INTEGER, response_time INTEGER, open_ai_organization TEXT, test_model TEXT, other TEXT, balance REAL, balance_updated_time INTEGER, used_quota INTEGER, status_code_mapping TEXT, auto_ban INTEGER, other_info TEXT, tag TEXT, setting TEXT, param_override TEXT, remark TEXT, settings TEXT)").execute(&pool).await.unwrap();
     sqlx::query("CREATE TABLE abilities (`group` TEXT, model TEXT, channel_id INTEGER, enabled INTEGER, priority INTEGER, weight INTEGER)").execute(&pool).await.unwrap();
     sqlx::query("CREATE TABLE options (`key` TEXT PRIMARY KEY, value TEXT)").execute(&pool).await.unwrap();
+    sqlx::query("CREATE TABLE perf_metrics (id INTEGER PRIMARY KEY AUTOINCREMENT,model_name TEXT,`group` TEXT,bucket_ts INTEGER,request_count INTEGER DEFAULT 0,success_count INTEGER DEFAULT 0,total_latency_ms INTEGER DEFAULT 0,ttft_sum_ms INTEGER DEFAULT 0,ttft_count INTEGER DEFAULT 0,output_tokens INTEGER DEFAULT 0,generation_ms INTEGER DEFAULT 0)").execute(&pool).await.unwrap();
 
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -32,6 +33,28 @@ async fn setup() -> (Router, SqlitePool, i64) {
             .unwrap();
     }
 
+    sqlx::query("UPDATE logs SET other='{\"cache_tokens\":7,\"cache_creation_tokens\":3}' WHERE model_name='m1' AND prompt_tokens=10")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let bucket = now / 3600 * 3600;
+    for (model, requests, successes, latency, output, generation) in [
+        ("m1", 3, 2, 3000, 30, 3000),
+        ("m2", 1, 0, 1000, 0, 1000),
+    ] {
+        sqlx::query("INSERT INTO perf_metrics (model_name,`group`,bucket_ts,request_count,success_count,total_latency_ms,ttft_sum_ms,ttft_count,output_tokens,generation_ms) VALUES (?, 'default', ?, ?, ?, ?, 0, 0, ?, ?)")
+            .bind(model)
+            .bind(bucket)
+            .bind(requests)
+            .bind(successes)
+            .bind(latency)
+            .bind(output)
+            .bind(generation)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
     let caches = Caches::load(&pool).await.unwrap();
     let cfg = solo_new_api_rust::config::Config {
         port: 0,
@@ -44,6 +67,7 @@ async fn setup() -> (Router, SqlitePool, i64) {
     let state = AppState::new(cfg, pool.clone(), caches, b"test-secret".to_vec(), None);
     let app = solo_new_api_rust::routes::admin::log::router()
         .merge(solo_new_api_rust::routes::admin::data::router())
+        .merge(solo_new_api_rust::routes::admin::misc::router())
         .with_state(state);
     (app, pool, now)
 }
@@ -90,6 +114,8 @@ async fn log_list_filters_and_stats() {
         .unwrap();
     assert_eq!(m1["token_used"], 45);
     assert_eq!(m1["count"], 2);
+    assert_eq!(m1["cache_read_tokens"], 7);
+    assert_eq!(m1["cache_creation_tokens"], 3);
 
     let (_, users) = get(&app, &format!("/api/data/users?start_timestamp={}&end_timestamp={}", now - 3600, now + 1)).await;
     assert_eq!(users["data"][0]["username"], "root");
@@ -100,4 +126,16 @@ async fn log_list_filters_and_stats() {
 
     let (_, uptime) = get(&app, "/api/uptime/status").await;
     assert_eq!(uptime["data"].as_array().unwrap().len(), 0);
+
+    let (status, perf) = get(&app, "/api/perf-metrics/summary?hours=1").await;
+    assert_eq!(status, 200, "{perf}");
+    let models = perf["data"]["models"].as_array().unwrap();
+    assert_eq!(models[0]["model_name"], "m1");
+    assert_eq!(models[0]["request_count"], 3);
+    assert_eq!(models[0]["success_rate"], 66.67);
+    assert_eq!(models[0]["avg_latency_ms"], 1000.0);
+    assert_eq!(models[0]["avg_tps"], 10.0);
+    assert_eq!(perf["data"]["summary"]["success_rate"], 50.0);
+    assert_eq!(perf["data"]["summary"]["avg_latency_ms"], 1000.0);
+    assert_eq!(perf["data"]["summary"]["avg_tps"], 7.5);
 }

@@ -39,7 +39,6 @@ import { getModelChannelState } from '../lib/model-utils'
 import type { Model, Vendor } from '../types'
 import { DataTableRowActions } from './data-table-row-actions'
 import { DescriptionCell } from './description-cell'
-import { ModelSquareStatus } from './model-square-status'
 import { useModels } from './models-provider'
 
 const EMPTY_VENDORS: Vendor[] = []
@@ -132,14 +131,6 @@ export function useModelsColumns(
         },
       },
       {
-        accessorKey: 'square_state',
-        header: t('Model square visibility'),
-        size: 115,
-        enableSorting: false,
-        meta: { mobileBadge: true },
-        cell: ({ row }) => <ModelSquareStatus model={row.original} />,
-      },
-      {
         id: 'connections',
         header: t('Channels and groups'),
         size: 180,
@@ -189,44 +180,12 @@ export function useModelsColumns(
         ),
       },
       {
-        accessorKey: 'sync_official',
-        header: () => (
-          <TruncatedCell className='max-w-[120px]'>
-            {t('Sync policy')}
-          </TruncatedCell>
-        ),
-        size: 145,
-        enableSorting: false,
-        meta: { mobileHidden: true, label: t('Sync policy') },
-        cell: ({ row }) => (
-          <TruncatedCell className='text-muted-foreground max-w-[120px] text-sm'>
-            {row.original.id > 0 &&
-              (row.original.sync_official
-                ? t('Allow updates')
-                : t('Keep local'))}
-            {!row.original.id && '—'}
-          </TruncatedCell>
-        ),
-      },
-      {
         id: 'actions',
         header: t('Actions'),
         enableSorting: false,
         enableHiding: false,
         size: 105,
         cell: ({ row }) => <DataTableRowActions row={row} />,
-      },
-      {
-        accessorKey: 'status',
-        header: t('Display policy'),
-        enableHiding: false,
-        enableSorting: false,
-        cell: ({ row }) => {
-          const model = row.original
-          // 渠道派生行没有元数据，也就没有展示策略可言。
-          if (model.id <= 0) return '—'
-          return model.status === 1 ? t('Allowed') : t('Not listed')
-        },
       },
       {
         accessorKey: 'id',

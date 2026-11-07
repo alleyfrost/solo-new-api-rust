@@ -30,7 +30,6 @@ import {
   sideDrawerFooterClassName,
   sideDrawerFormClassName,
   sideDrawerHeaderClassName,
-  sideDrawerSwitchItemClassName,
 } from '@/components/drawer-layout'
 import { ErrorState } from '@/components/error-state'
 import { JsonEditor } from '@/components/json-editor'
@@ -60,7 +59,6 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
-import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import {
@@ -485,63 +483,6 @@ export function ModelMutateDrawer(props: {
                               )}
                             </FormDescription>
                             <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                    </SideDrawerSection>
-
-                    {/* Status & Sync */}
-                    <SideDrawerSection>
-                      <h3 className='text-sm font-semibold'>
-                        {t('Status & Sync')}
-                      </h3>
-
-                      <FormField
-                        control={form.control}
-                        name='status'
-                        render={({ field }) => (
-                          <FormItem className={sideDrawerSwitchItemClassName()}>
-                            <div className='flex flex-col gap-0.5'>
-                              <FormLabel className='text-base'>
-                                {t('Model square visibility')}
-                              </FormLabel>
-                              <FormDescription>
-                                {t(
-                                  'Allow listing when a channel is available and the user has group access. This does not change API access.'
-                                )}
-                              </FormDescription>
-                            </div>
-                            <FormControl>
-                              <Switch
-                                checked={field.value}
-                                onCheckedChange={field.onChange}
-                              />
-                            </FormControl>
-                          </FormItem>
-                        )}
-                      />
-
-                      <FormField
-                        control={form.control}
-                        name='sync_official'
-                        render={({ field }) => (
-                          <FormItem className={sideDrawerSwitchItemClassName()}>
-                            <div className='flex flex-col gap-0.5'>
-                              <FormLabel className='text-base'>
-                                {t('Allow metadata sync')}
-                              </FormLabel>
-                              <FormDescription>
-                                {t(
-                                  'Keep this model eligible for official metadata updates. This deployment does not run any synchronization itself.'
-                                )}
-                              </FormDescription>
-                            </div>
-                            <FormControl>
-                              <Switch
-                                checked={field.value}
-                                onCheckedChange={field.onChange}
-                              />
-                            </FormControl>
                           </FormItem>
                         )}
                       />

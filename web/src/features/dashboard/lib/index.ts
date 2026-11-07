@@ -26,7 +26,7 @@ export {
   saveChartPreferences,
   buildDefaultDashboardFilters,
 } from './filters'
-export { processChartData, processUserChartData } from './charts'
+export { processChartData } from './charts'
 export {
   buildDashboardFlowData,
   buildFlowSankeySpec,
