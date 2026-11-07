@@ -153,7 +153,9 @@ function findButton(text: string, required = true): HTMLButtonElement | null {
   return button ?? null
 }
 
-function getControlByLabel(labelText: 'Name' | 'Quantity'): HTMLInputElement
+function getControlByLabel(
+  labelText: 'Name' | 'Quantity' | 'Custom Key (optional)'
+): HTMLInputElement
 function getControlByLabel(labelText: 'Group'): HTMLButtonElement
 function getControlByLabel(labelText: 'Auto group order'): HTMLElement
 function getControlByLabel(labelText: string): HTMLElement {
@@ -402,4 +404,114 @@ describe('API key expiry across editing sessions', () => {
       expect(payloads[0]?.expired_time).toBe(-1)
     }
   )
+})
+
+describe('custom key on create only', () => {
+  const storedKey = 'my_custom_key_2026'
+  const existingKey: ApiKey = {
+    id: 1,
+    name: 'cli',
+    key: storedKey,
+    status: 1,
+    remain_quota: 0,
+    used_quota: 0,
+    unlimited_quota: true,
+    expired_time: -1,
+    created_time: 1,
+    accessed_time: 0,
+    group: 'default',
+    auto_groups: [],
+    cross_group_retry: false,
+    model_limits_enabled: false,
+    model_limits: '',
+    allow_ips: '',
+    allow_user_quota_query: true,
+  }
+
+  async function renderUpdateDrawer(): Promise<() => unknown[]> {
+    installApiFixtures([])
+    const getFixture = apiClient.get
+    apiClient.get = async (url: string) =>
+      url === '/api/token/1'
+        ? { data: { success: true, data: existingKey } }
+        : getFixture(url)
+    const put = vi.spyOn(api, 'put').mockResolvedValue({
+      data: { success: true },
+    })
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    renderedDrawer = { queryClient }
+    render(
+      <QueryClientProvider client={queryClient}>
+        <I18nextProvider i18n={i18n}>
+          <ApiKeysProvider>
+            <ApiKeysMutateDrawer
+              open
+              currentRow={existingKey}
+              onOpenChange={() => undefined}
+            />
+          </ApiKeysProvider>
+        </I18nextProvider>
+      </QueryClientProvider>
+    )
+    await waitFor(() => expect(findButton('Save changes', true)).toBeEnabled())
+    return () => put.mock.calls.map((call) => call[1])
+  }
+
+  test('submits the pasted sk- key without its prefix', async () => {
+    const createdPayloads: Array<Record<string, unknown>> = []
+    installApiFixtures(createdPayloads)
+    await renderCreateDrawer()
+
+    changeInput(getControlByLabel('Name'), 'cli')
+    changeInput(getControlByLabel('Custom Key (optional)'), `sk-${storedKey}`)
+    fireEvent.click(findButton('Save changes', true))
+    await waitFor(() => expect(createdPayloads).toHaveLength(1))
+
+    expect(createdPayloads[0]?.key).toBe(storedKey)
+  })
+
+  test('leaves the key out of the payload when the field is blank', async () => {
+    const createdPayloads: Array<Record<string, unknown>> = []
+    installApiFixtures(createdPayloads)
+    await renderCreateDrawer()
+
+    changeInput(getControlByLabel('Name'), 'auto-generated')
+    fireEvent.click(findButton('Save changes', true))
+    await waitFor(() => expect(createdPayloads).toHaveLength(1))
+
+    expect('key' in (createdPayloads[0] ?? {})).toBe(false)
+  })
+
+  test('rejects a hyphenated key before any request', async () => {
+    const createdPayloads: Array<Record<string, unknown>> = []
+    installApiFixtures(createdPayloads)
+    await renderCreateDrawer()
+
+    changeInput(getControlByLabel('Name'), 'cli')
+    changeInput(getControlByLabel('Custom Key (optional)'), 'my-hyphen-key-123')
+    fireEvent.click(findButton('Save changes', true))
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          'Token key may only contain letters, digits or underscore'
+        )
+      ).toBeInTheDocument()
+    )
+    expect(createdPayloads).toHaveLength(0)
+  })
+
+  test('hides the key field when editing an existing key', async () => {
+    const putPayloads = await renderUpdateDrawer()
+
+    expect(screen.queryByText('Custom Key (optional)')).toBe(null)
+
+    fireEvent.click(findButton('Save changes', true))
+    await waitFor(() => expect(putPayloads()).toHaveLength(1))
+    const payload = putPayloads()[0] as Record<string, unknown>
+    expect(payload.name).toBe('cli')
+    expect('key' in payload).toBe(false)
+  })
 })

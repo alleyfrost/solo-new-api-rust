@@ -288,7 +288,10 @@ export function ApiKeysMutateDrawer({
   const onSubmit = async (data: ApiKeyFormValues) => {
     setIsSubmitting(true)
     try {
-      const basePayload = transformFormDataToPayload(data)
+      // 编辑态不提交密钥：换密钥会让已下发的客户端配置静默失效
+      const basePayload = transformFormDataToPayload(
+        isUpdate ? { ...data, key: '' } : data
+      )
 
       if (isUpdate && currentRow) {
         const result = await updateApiKey({
@@ -403,6 +406,34 @@ export function ApiKeysMutateDrawer({
                   </FormItem>
                 )}
               />
+
+              {!isUpdate && (
+                <FormField
+                  control={form.control}
+                  name='key'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Custom Key (optional)')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          {...field}
+                          autoComplete='off'
+                          spellCheck={false}
+                          placeholder={t(
+                            'Leave blank to generate automatically'
+                          )}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t(
+                          'Letters, digits and underscores only, 16-64 characters. A pasted sk- prefix is removed. The key cannot be changed after creation.'
+                        )}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
 
               <FormField
                 control={form.control}

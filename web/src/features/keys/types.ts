@@ -88,6 +88,8 @@ export interface SearchApiKeysParams {
 /// 只记用量不记金额，新建由服务端取默认额度，更新沿用库中原值。
 export interface ApiKeyFormData {
   name: string
+  /** 仅新建可指定；留空由服务端随机生成 */
+  key?: string
   expired_time: number
   model_limits_enabled: boolean
   model_limits: string
