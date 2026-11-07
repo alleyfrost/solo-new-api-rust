@@ -23,6 +23,7 @@ pub struct PageQuery {
 pub struct TokenInput {
     pub id: Option<i64>,
     pub name: Option<String>,
+    pub key: Option<String>,
     pub remain_quota: Option<i64>,
     pub expired_time: Option<i64>,
     pub unlimited_quota: Option<bool>,
@@ -114,6 +115,38 @@ fn generate_key() -> String {
     (0..48)
         .map(|_| CHARS[rng.gen_range(0..CHARS.len())] as char)
         .collect()
+}
+
+/// 自填密钥的长度边界：下限挡住一猜就中的短串，上限相对列宽 `varchar(128)`
+/// 与随机生成的 48 位留余量。
+const KEY_MIN_LEN: usize = 16;
+const KEY_MAX_LEN: usize = 64;
+
+/// 归一化自填密钥：容忍直接粘贴完整 `sk-...`（认证侧本来就会剥一层前缀），
+/// 只接受字母、数字、下划线。`-` 必须禁用——`auth::token::extract_key` 与 Go 的
+/// `strings.Split(key, "-")[0]` 都在第一个连字符处截断，含 `-` 的密钥会认错。
+/// 返回空串表示“未提供”，由调用方回落随机生成。
+fn normalize_key(raw: &str) -> Result<String, String> {
+    let trimmed = raw.trim();
+    let key = trimmed.strip_prefix("sk-").unwrap_or(trimmed);
+    if key.is_empty() {
+        return Ok(String::new());
+    }
+    if key.chars().count() < KEY_MIN_LEN || key.chars().count() > KEY_MAX_LEN {
+        return Err(format!(
+            "Token key must be {KEY_MIN_LEN}-{KEY_MAX_LEN} characters"
+        ));
+    }
+    if !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return Err("Token key may only contain letters, digits or underscore".to_string());
+    }
+    Ok(key.to_string())
+}
+
+/// 前端只用 `message_key` 查本地词条，所以错误里要同时带英文原文。
+fn key_error(message: impl Into<String>) -> ApiError {
+    let message = message.into();
+    ApiError::new(StatusCode::BAD_REQUEST, message.clone()).with_message_key(message)
 }
 
 fn now() -> i64 {
@@ -248,9 +281,31 @@ pub async fn create(
         .filter(|n| !n.trim().is_empty())
         .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "name is required"))?;
     if name.chars().count() > 50 {
-        return Err(ApiError::new(StatusCode::BAD_REQUEST, "Token name is too long"));
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "Token name is too long",
+        ));
     }
-    let key = generate_key();
+    let key = match input.key.as_deref() {
+        Some(raw) => normalize_key(raw).map_err(key_error)?,
+        None => String::new(),
+    };
+    let key = if key.is_empty() {
+        generate_key()
+    } else {
+        // 唯一索引 `idx_tokens_key` 不区分软删行，所以这里也查全表：
+        // 与已删除令牌重键同样会被库拒绝。
+        let clash: Option<i64> =
+            sqlx::query_scalar("SELECT id FROM tokens WHERE `key` = ? LIMIT 1")
+                .bind(&key)
+                .fetch_optional(&state.pool)
+                .await
+                .map_err(internal)?;
+        if clash.is_some() {
+            return Err(key_error("Token key is already in use"));
+        }
+        key
+    };
     let ts = now();
     let auto_groups = input
         .auto_groups
@@ -279,7 +334,11 @@ pub async fn create(
     .bind(input.allow_user_quota_query.unwrap_or(true))
     .execute(&state.pool)
     .await
-    .map_err(internal)?;
+    .map_err(|e| match &e {
+        // 上面已经查过重复，这里只兜并发写入撞 `idx_tokens_key` 的情况。
+        sqlx::Error::Database(db) if db.is_unique_violation() => key_error("Token key is already in use"),
+        _ => internal(e),
+    })?;
     let id = result.last_insert_rowid();
     state.reload_caches().await.map_err(internal)?;
     let token = fetch_token(&state, ctx.user_id, id).await?;
@@ -308,9 +367,14 @@ pub async fn update(
         let token = fetch_token(&state, ctx.user_id, id).await?;
         return Ok(json_ok(&token_json(&token, false)));
     }
+    // 密钥只在创建时可指定，更新一律忽略 `input.key`：换密钥会让已下发的客户端
+    // 配置静默失效，要改就新建一个再删旧的。
     let name = input.name.clone().unwrap_or(current.name);
     if name.chars().count() > 50 {
-        return Err(ApiError::new(StatusCode::BAD_REQUEST, "Token name is too long"));
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "Token name is too long",
+        ));
     }
     let auto_groups = match input.auto_groups.as_ref() {
         Some(groups) if groups.is_empty() => None,
