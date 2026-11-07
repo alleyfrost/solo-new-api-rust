@@ -76,10 +76,11 @@ function titlesOf(result: { current: ReturnType<typeof useSidebarData>['navGroup
 describe('sidebar visibility with current routes', () => {
   it('shows all product entries by default (empty admin config falls back to defaults)', () => {
     const { result } = sidebarFor()
+    // Playground leads its own group, mirroring the upstream layout.
     expect(titlesOf(result)).toEqual([
-      'Overview',
-      'Model Call Analytics',
       'Playground',
+      'Overview',
+      'Dashboard',
       'API Keys',
       'Usage Logs',
       'Channels',

@@ -20,9 +20,9 @@ import {
   Activity,
   Box,
   FileText,
+  FlaskConical,
   Key,
   LayoutDashboard,
-  MessagesSquare,
   Radio,
   Settings2,
 } from 'lucide-react'
@@ -42,6 +42,20 @@ export function useSidebarData(): SidebarData {
   return {
     navGroups: [
       {
+        // Group id `chat` is what routes the Playground entry through the
+        // `chat.playground` sidebar toggle; disabling it empties and drops
+        // this whole group.
+        id: 'chat',
+        title: t('Chat'),
+        items: [
+          {
+            title: t('Playground'),
+            url: '/playground',
+            icon: FlaskConical,
+          },
+        ],
+      },
+      {
         id: 'general',
         title: t('General'),
         items: [
@@ -51,14 +65,9 @@ export function useSidebarData(): SidebarData {
             icon: Activity,
           },
           {
-            title: t('Model Call Analytics'),
+            title: t('Dashboard'),
             url: '/dashboard/models',
             icon: LayoutDashboard,
-          },
-          {
-            title: t('Playground'),
-            url: '/playground',
-            icon: MessagesSquare,
           },
           {
             title: t('API Keys'),
@@ -94,6 +103,5 @@ export function useSidebarData(): SidebarData {
         ],
       },
     ],
-
   }
 }

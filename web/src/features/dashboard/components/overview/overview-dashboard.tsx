@@ -57,16 +57,8 @@ import { requireServerSuccess } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth-store'
 
-import {
-  useApiInfo,
-  useDashboardContentVisibility,
-} from '../../hooks/use-status-data'
-import { AnnouncementsPanel } from './announcements-panel'
-import { ApiInfoPanel } from './api-info-panel'
-import { FAQPanel } from './faq-panel'
 import { PerformanceHealthPanel } from './performance-health-panel'
 import { SummaryCards } from './summary-cards'
-import { UptimePanel } from './uptime-panel'
 
 const SETUP_GUIDE_VISIBILITY_STORAGE_KEY =
   'dashboard_overview_setup_guide_expanded'
@@ -135,21 +127,6 @@ function saveSetupGuideExpanded(expanded: boolean): void {
 function getCurrentOrigin(): string {
   if (typeof window === 'undefined') return ''
   return window.location.origin
-}
-
-function normalizeEndpoint(sourceUrl?: string): string {
-  const fallback = `${getCurrentOrigin()}/v1/chat/completions`
-  const trimmed = sourceUrl?.trim()
-  if (!trimmed) return fallback
-
-  const withoutTrailingSlash = trimmed.replace(/\/+$/, '')
-  if (withoutTrailingSlash.endsWith('/v1/chat/completions')) {
-    return withoutTrailingSlash
-  }
-  if (withoutTrailingSlash.endsWith('/v1')) {
-    return `${withoutTrailingSlash}/chat/completions`
-  }
-  return `${withoutTrailingSlash}/v1/chat/completions`
 }
 
 function getPreferredKey(keys: ApiKey[]): ApiKey | null {
@@ -457,13 +434,6 @@ export function OverviewDashboard() {
   const setupGuideId = useId()
   const setupGuideToggleRef = useRef<HTMLButtonElement>(null)
   const user = useAuthStore((state) => state.auth.user)
-  const { items: apiInfoItems } = useApiInfo()
-  const {
-    apiInfo: showApiInfoPanel,
-    announcements: showAnnouncementsPanel,
-    faq: showFAQPanel,
-    uptimeKuma: showUptimePanel,
-  } = useDashboardContentVisibility()
   const [manualSetupGuideExpanded, setManualSetupGuideExpanded] = useState<
     boolean | null
   >(() => getSavedSetupGuideExpanded())
@@ -535,7 +505,6 @@ export function OverviewDashboard() {
         to: '/usage-logs',
         icon: FileText,
       },
-
     ],
     [t]
   )
@@ -549,7 +518,7 @@ export function OverviewDashboard() {
     () => [
       {
         label: t('Route active'),
-        value: apiInfoItems.length > 0 ? t('Online') : t('Current domain'),
+        value: t('Current domain'),
         icon: RadioTower,
         tone: 'info',
       },
@@ -566,11 +535,11 @@ export function OverviewDashboard() {
         tone: 'chart-4',
       },
     ],
-    [apiInfoItems.length, modelsQuery.data, preferredKey, t]
+    [modelsQuery.data, preferredKey, t]
   )
 
   const requestExample = useMemo<RequestExample>(() => {
-    const endpoint = normalizeEndpoint(apiInfoItems[0]?.url)
+    const endpoint = `${getCurrentOrigin()}/v1/chat/completions`
     const model = modelsQuery.data?.[0] ?? 'gpt-4o-mini'
     const keyName = preferredKey?.name ?? t('No API key yet')
     const ready = Boolean(preferredKey?.id && model)
@@ -585,16 +554,13 @@ export function OverviewDashboard() {
         : 'sk-...',
       ready,
     }
-  }, [apiInfoItems, modelsQuery.data, preferredKey, t])
+  }, [modelsQuery.data, preferredKey, t])
 
   const completedStepCount = startSteps.filter((step) => step.completed).length
   const setupComplete = completedStepCount === startSteps.length
   const setupStatusReady = apiKeysQuery.isFetched && Boolean(user)
   const setupGuideExpanded =
     manualSetupGuideExpanded ?? (setupStatusReady && !setupComplete)
-  const showLeftContentPanels =
-    isAdmin || showApiInfoPanel || showAnnouncementsPanel || showFAQPanel
-  const showContentPanels = showLeftContentPanels || showUptimePanel
 
   const handleSetupGuideToggle = () => {
     const nextExpanded = !setupGuideExpanded
@@ -765,52 +731,11 @@ export function OverviewDashboard() {
 
           <SummaryCards />
 
-          {showContentPanels && (
-            <CardStaggerContainer
-              className={cn(
-                'grid grid-cols-1 gap-4',
-                showLeftContentPanels &&
-                  showUptimePanel &&
-                  'xl:grid-cols-[minmax(0,1fr)_22rem]'
-              )}
-            >
-              {showLeftContentPanels && (
-                <div
-                  className={cn(
-                    'grid min-w-0 grid-cols-1 gap-4',
-                    (showApiInfoPanel ||
-                      showAnnouncementsPanel ||
-                      showFAQPanel) &&
-                      'lg:grid-cols-2'
-                  )}
-                >
-                  {isAdmin && (
-                    <CardStaggerItem className='lg:col-span-2'>
-                      <PerformanceHealthPanel />
-                    </CardStaggerItem>
-                  )}
-                  {showApiInfoPanel && (
-                    <CardStaggerItem>
-                      <ApiInfoPanel />
-                    </CardStaggerItem>
-                  )}
-                  {showAnnouncementsPanel && (
-                    <CardStaggerItem>
-                      <AnnouncementsPanel />
-                    </CardStaggerItem>
-                  )}
-                  {showFAQPanel && (
-                    <CardStaggerItem>
-                      <FAQPanel />
-                    </CardStaggerItem>
-                  )}
-                </div>
-              )}
-              {showUptimePanel && (
-                <CardStaggerItem>
-                  <UptimePanel />
-                </CardStaggerItem>
-              )}
+          {isAdmin && (
+            <CardStaggerContainer className='grid grid-cols-1 gap-4'>
+              <CardStaggerItem>
+                <PerformanceHealthPanel />
+              </CardStaggerItem>
             </CardStaggerContainer>
           )}
         </div>

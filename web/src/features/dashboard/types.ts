@@ -164,22 +164,6 @@ export interface ProcessedFlowData {
 }
 
 // ============================================================================
-// Uptime Monitoring Types
-// ============================================================================
-
-export interface UptimeMonitor {
-  name: string
-  uptime: number
-  status: number
-  group?: string
-}
-
-export interface UptimeGroupResult {
-  categoryName: string
-  monitors: UptimeMonitor[]
-}
-
-// ============================================================================
 // Dashboard Filter Types
 // ============================================================================
 
@@ -220,14 +204,6 @@ export interface ApiInfoItem {
   color: string
 }
 
-export interface PingStatus {
-  latency: number | null
-  testing: boolean
-  error: boolean
-}
-
-export type PingStatusMap = Record<string, PingStatus>
-
 // ============================================================================
 // Chart Types
 // ============================================================================
@@ -248,26 +224,4 @@ export interface ProcessedChartData {
 export interface ProcessedUserChartData {
   spec_user_rank: VChartSpec
   spec_user_trend: VChartSpec
-}
-
-// ============================================================================
-// Announcement Types
-// ============================================================================
-
-export interface AnnouncementItem {
-  id?: number
-  content: string
-  publishDate?: string
-  type?: 'default' | 'ongoing' | 'success' | 'warning' | 'error'
-  extra?: string
-}
-
-// ============================================================================
-// FAQ Types
-// ============================================================================
-
-export interface FAQItem {
-  id?: number
-  question: string
-  answer: string
 }

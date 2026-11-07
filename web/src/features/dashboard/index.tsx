@@ -185,7 +185,7 @@ const SECTION_META: Record<DashboardSectionId, { titleKey: string }> = {
     titleKey: 'Overview',
   },
   models: {
-    titleKey: 'Model Call Analytics',
+    titleKey: 'Dashboard',
   },
   flow: {
     titleKey: 'Flow',
