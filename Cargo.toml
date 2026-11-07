@@ -29,6 +29,9 @@ async-stream = "0.3"
 tokio-stream = "0.1"
 switchyard-translation = { path = "vendor/switchyard-translation" }
 
+[target.'cfg(all(target_os = "linux", target_env = "gnu"))'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"

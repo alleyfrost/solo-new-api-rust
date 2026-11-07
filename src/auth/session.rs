@@ -79,6 +79,35 @@ pub fn verify_password(hash: &str, password: &str) -> bool {
         .is_some()
 }
 
+/// argon2id 单次占用 19 MiB 工作内存，并发数必须封顶：没有上限时一阵并发登录
+/// 就能把 19 MiB × 并发数 的瞬时占用顶到容器上限。
+static KDF_PERMITS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
+
+/// 校验放阻塞线程池执行，避免 19 MiB 的 KDF 占住 tokio worker 影响转发请求。
+pub async fn verify_password_async(hash: &str, password: &str) -> bool {
+    let Ok(_permit) = KDF_PERMITS.acquire().await else {
+        return false;
+    };
+    let hash = hash.to_owned();
+    let password = password.to_owned();
+    tokio::task::spawn_blocking(move || verify_password(&hash, &password))
+        .await
+        .unwrap_or(false)
+}
+
+pub async fn hash_password_async(password: &str) -> Result<String, ApiError> {
+    let _permit = KDF_PERMITS.acquire().await.map_err(|_| {
+        ApiError::new(
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            "password hashing unavailable",
+        )
+    })?;
+    let password = password.to_owned();
+    tokio::task::spawn_blocking(move || hash_password(&password))
+        .await
+        .map_err(|e| ApiError::new(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+}
+
 pub const PASSWORD_MIN_CHARS: usize = 8;
 pub const PASSWORD_MAX_CHARS: usize = 128;
 
@@ -242,4 +271,31 @@ pub async fn refresh_session(
         },
     };
     Ok((bundle, next_plain))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn async_kdf_roundtrip() {
+        let hash = hash_password_async("correct horse").await.expect("hash");
+        assert!(verify_password_async(&hash, "correct horse").await);
+        assert!(!verify_password_async(&hash, "wrong horse").await);
+    }
+
+    #[tokio::test]
+    async fn concurrent_verifies_all_complete() {
+        let hash = hash_password_async("correct horse").await.expect("hash");
+        let mut handles = Vec::new();
+        for _ in 0..4 {
+            let hash = hash.clone();
+            handles.push(tokio::spawn(async move {
+                verify_password_async(&hash, "correct horse").await
+            }));
+        }
+        for handle in handles {
+            assert!(handle.await.expect("join"));
+        }
+    }
 }

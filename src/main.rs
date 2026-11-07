@@ -1,7 +1,29 @@
 use solo_new_api_rust::{auth, config, db, logging, routes, state};
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    tune_glibc_allocator();
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(run())
+}
+
+/// argon2id 的 19 MiB 工作内存按次分配；glibc 默认把这种大块留在按线程划分的
+/// arena 里，释放后也不还给内核，并发登录会把 RSS 按 19 MiB × arena 数抬高。
+/// 阈值压到 16 MiB 迫使大块走 mmap/munmap，trim 让堆顶空闲页尽快归还。
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+fn tune_glibc_allocator() {
+    unsafe {
+        libc::mallopt(libc::M_MMAP_THRESHOLD, 16 * 1024 * 1024);
+        libc::mallopt(libc::M_TRIM_THRESHOLD, 128 * 1024);
+        libc::mallopt(libc::M_ARENA_MAX, 2);
+    }
+}
+
+#[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+fn tune_glibc_allocator() {}
+
+async fn run() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();

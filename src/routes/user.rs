@@ -45,7 +45,7 @@ pub async fn login(
             "Invalid username or password",
         ));
     };
-    if user.status != 1 || !session::verify_password(&user.password, &req.password) {
+    if user.status != 1 || !session::verify_password_async(&user.password, &req.password).await {
         return Err(ApiError::new(
             StatusCode::UNAUTHORIZED,
             "Invalid username or password",
@@ -308,7 +308,7 @@ async fn change_password(
         return Err(ApiError::new(StatusCode::UNAUTHORIZED, "Session expired!"));
     };
     // 账号原本没有密码时不设原密码门槛，与 Go 的 firstPassword 分支一致。
-    if !hash.is_empty() && !session::verify_password(&hash, original_password) {
+    if !hash.is_empty() && !session::verify_password_async(&hash, original_password).await {
         return Err(ApiError::new(StatusCode::OK, "Original password is incorrect"));
     }
     let row: Option<(i64, String, String, String, String, i64, i64)> = sqlx::query_as(
@@ -326,7 +326,7 @@ async fn change_password(
         return Err(ApiError::new(StatusCode::UNAUTHORIZED, "Session expired!"));
     }
 
-    let new_hash = session::hash_password(new_password)?;
+    let new_hash = session::hash_password_async(new_password).await?;
     let next_version = auth_version + 1;
     let now = session::now();
     sqlx::query("UPDATE users SET password=?, auth_version=? WHERE id=?")
