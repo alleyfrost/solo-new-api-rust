@@ -52,8 +52,8 @@ fn small_request() -> Request {
         .unwrap()
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn huge_bodies_are_serialized_and_small_bodies_are_not() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn huge_bodies_queue_beyond_the_permit_limit_and_small_bodies_bypass() {
     let app = Router::new()
         .route(
             "/upload",
@@ -67,16 +67,21 @@ async fn huge_bodies_are_serialized_and_small_bodies_are_not() {
             solo_new_api_rust::mem::large_body_gate,
         ));
 
+    // 4 个并发闸门：前 4 个并行完成，第 5 个必须等一轮。
     let started = Instant::now();
-    let a = app.clone().oneshot(big_request());
-    let b = async {
-        tokio::time::sleep(Duration::from_millis(10)).await;
-        app.clone().oneshot(big_request()).await
-    };
-    let _ = tokio::join!(a, b);
+    let mut handles = Vec::new();
+    for _ in 0..5 {
+        let app = app.clone();
+        handles.push(tokio::spawn(async move {
+            let _ = app.oneshot(big_request()).await;
+        }));
+    }
+    for handle in handles {
+        let _ = handle.await;
+    }
     assert!(
-        started.elapsed() >= Duration::from_millis(220),
-        "huge bodies must be serialized, elapsed {:?}",
+        started.elapsed() >= Duration::from_millis(200),
+        "the fifth huge body must wait for a permit, elapsed {:?}",
         started.elapsed()
     );
 
@@ -90,8 +95,31 @@ async fn huge_bodies_are_serialized_and_small_bodies_are_not() {
 }
 
 #[test]
-fn gate_limits_are_bounded() {
+fn gate_limits_come_from_settings() {
     let gate = BodyGate::default();
-    assert_eq!(gate.big.available_permits(), 2);
-    assert_eq!(gate.huge.available_permits(), 1);
+    assert_eq!(gate.big.limit(), 8);
+    assert_eq!(gate.huge.limit(), 4);
+    gate.set_limits(2, 1);
+    assert_eq!(gate.big.limit(), 2);
+    assert_eq!(gate.huge.limit(), 1);
+}
+
+#[tokio::test]
+async fn lowering_the_limit_queues_new_requests() {
+    let gate = BodyGate::default();
+    gate.set_limits(8, 1);
+    let held = gate.huge.acquire().await;
+    assert!(
+        tokio::time::timeout(Duration::from_millis(30), gate.huge.acquire())
+            .await
+            .is_err(),
+        "the second request must wait while the single slot is taken"
+    );
+    drop(held);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), gate.huge.acquire())
+            .await
+            .is_ok(),
+        "releasing the slot must wake the waiter"
+    );
 }

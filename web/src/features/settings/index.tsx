@@ -20,6 +20,7 @@ import { useTranslation } from 'react-i18next'
 
 import { SectionPageLayout } from '@/components/layout'
 
+import { ConcurrencyCard } from './concurrency-card'
 import { LogCard } from './log-card'
 import { SiteCard } from './site-card'
 
@@ -32,6 +33,7 @@ export function Settings() {
       <SectionPageLayout.Content>
         <div className='space-y-4'>
           <SiteCard />
+          <ConcurrencyCard />
           <LogCard />
           <p className='text-muted-foreground text-xs'>
             {t(

@@ -42,6 +42,8 @@ export const OPTION_KEYS = {
   logConsume: 'LogConsumeEnabled',
   logExport: 'log_setting.user_export_enabled',
   logRangeDays: 'log_setting.max_range_days',
+  bodyGateBig: 'BodyGateBigConcurrency',
+  bodyGateHuge: 'BodyGateHugeConcurrency',
 } as const
 
 export const SYSTEM_NAME_MAX_LENGTH = 64
@@ -52,3 +54,7 @@ export const IMAGE_MODELS_MAX_LENGTH = 4096
 export const MAX_IMAGE_MODELS = 64
 export const MIN_RANGE_DAYS = 1
 export const MAX_RANGE_DAYS = 3650
+export const MIN_BODY_GATE = 1
+export const MAX_BODY_GATE = 64
+export const DEFAULT_BODY_GATE_BIG = 8
+export const DEFAULT_BODY_GATE_HUGE = 4

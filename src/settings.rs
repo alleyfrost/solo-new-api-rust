@@ -13,8 +13,13 @@ pub const KEY_LOG_EXPORT_ENABLED: &str = "log_setting.user_export_enabled";
 pub const KEY_LOG_MAX_RANGE_DAYS: &str = "log_setting.max_range_days";
 /// 只会走 `/v1/images/generations` 的模型；列在这里的模型允许用 chat 请求触发生图。
 pub const KEY_IMAGE_MODELS: &str = "ImageModels";
+/// 大请求体（2–8 MiB / >8 MiB）的并发闸门，限制峰值内存。
+pub const KEY_BODY_GATE_BIG: &str = "BodyGateBigConcurrency";
+pub const KEY_BODY_GATE_HUGE: &str = "BodyGateHugeConcurrency";
 
-pub const KEYS: [&str; 8] = [
+pub const KEYS: [&str; 10] = [
+    KEY_BODY_GATE_BIG,
+    KEY_BODY_GATE_HUGE,
     KEY_IMAGE_MODELS,
     KEY_LOGO,
     KEY_LOG_CONSUME_ENABLED,
@@ -34,6 +39,10 @@ pub const MAX_RANGE_DAYS: i64 = 3650;
 pub const MAX_IMAGE_MODELS: usize = 64;
 pub const MAX_MODEL_NAME_CHARS: usize = 128;
 const MAX_IMAGE_MODELS_CHARS: usize = 4096;
+pub const MIN_BODY_GATE: usize = 1;
+pub const MAX_BODY_GATE: usize = 64;
+pub const DEFAULT_BODY_GATE_BIG: usize = 8;
+pub const DEFAULT_BODY_GATE_HUGE: usize = 4;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Settings {
@@ -45,6 +54,8 @@ pub struct Settings {
     pub log_export_enabled: bool,
     pub log_max_range_days: i64,
     pub image_models: Vec<String>,
+    pub body_gate_big: usize,
+    pub body_gate_huge: usize,
 }
 
 impl Default for Settings {
@@ -58,6 +69,8 @@ impl Default for Settings {
             log_export_enabled: true,
             log_max_range_days: crate::routes::admin::log::MAX_EXPORT_DAYS,
             image_models: Vec::new(),
+            body_gate_big: DEFAULT_BODY_GATE_BIG,
+            body_gate_huge: DEFAULT_BODY_GATE_HUGE,
         }
     }
 }
@@ -101,6 +114,14 @@ impl Settings {
                     .map(String::as_str)
                     .unwrap_or(""),
             ),
+            body_gate_big: gate_limit(
+                options.get(KEY_BODY_GATE_BIG),
+                defaults.body_gate_big,
+            ),
+            body_gate_huge: gate_limit(
+                options.get(KEY_BODY_GATE_HUGE),
+                defaults.body_gate_huge,
+            ),
         }
     }
 
@@ -112,6 +133,8 @@ impl Settings {
     /// 白名单键的当前生效值，供 `GET /api/option/` 返回；键名按字母序，前端可直接铺表单。
     pub fn entries(&self) -> Vec<(&'static str, String)> {
         vec![
+            (KEY_BODY_GATE_BIG, self.body_gate_big.to_string()),
+            (KEY_BODY_GATE_HUGE, self.body_gate_huge.to_string()),
             (KEY_IMAGE_MODELS, self.image_models.join(",")),
             (KEY_LOGO, self.logo.clone()),
             (
@@ -183,6 +206,17 @@ pub fn normalize(key: &str, raw: &Value) -> Result<String, String> {
             }
             Ok(days.to_string())
         }
+        KEY_BODY_GATE_BIG | KEY_BODY_GATE_HUGE => {
+            let limit = text.trim().parse::<usize>().map_err(|_| {
+                format!("Expected an integer between {MIN_BODY_GATE} and {MAX_BODY_GATE}")
+            })?;
+            if !(MIN_BODY_GATE..=MAX_BODY_GATE).contains(&limit) {
+                return Err(format!(
+                    "Expected an integer between {MIN_BODY_GATE} and {MAX_BODY_GATE}"
+                ));
+            }
+            Ok(limit.to_string())
+        }
         KEY_IMAGE_MODELS => {
             let models = split_models(&text);
             if models.len() > MAX_IMAGE_MODELS {
@@ -223,6 +257,12 @@ fn split_models(text: &str) -> Vec<String> {
         out.push(name.to_string());
     }
     out
+}
+
+fn gate_limit(raw: Option<&String>, fallback: usize) -> usize {
+    raw.and_then(|v| v.parse::<usize>().ok())
+        .filter(|v| (MIN_BODY_GATE..=MAX_BODY_GATE).contains(v))
+        .unwrap_or(fallback)
 }
 
 fn parse_bool(text: &str) -> Result<bool, String> {

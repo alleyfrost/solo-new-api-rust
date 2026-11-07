@@ -149,9 +149,9 @@ vendor/        switchyard-translation（Apache-2.0，固定版本）
 ## 内存与并发
 
 - 运行时是 tokio 多线程 + 每请求 task（协程），不按请求建线程；流式转发只保留单个 SSE 事件（上限 1 MiB），客户端断连立即取消上游读取。
-- 大请求体有背压闸门：2–8 MiB 最多 2 个并发，>8 MiB 最多 1 个并发；超过 32 MiB 直接 413。实测 32 MiB 聊天请求峰值 RSS 约 76 MiB，超限请求不会放大内存。
+- 大请求体有背压闸门：默认 2–8 MiB 最多 8 个并发、>8 MiB 最多 4 个并发，系统设置里可调（`BodyGateBigConcurrency` / `BodyGateHugeConcurrency`，1–64）；超过 32 MiB 直接 413。实测 32 MiB 聊天请求峰值 RSS 约 76 MiB，超限请求不会放大内存。
 - 大块缓冲走 mmap，请求结束 munmap 归还内核；SQLite 每连接页缓存 1 MiB、空闲 60s 回收，后台每 30s 归还一次空闲堆。
-- 本地实测（amd64 模拟 + mock 上游）：4×8 MiB 并发峰值匿名内存 34 MiB（优化前 177 MiB），2×24 MiB 峰值 55 MiB（优化前 313 MiB）；4 路 4.5 MiB 流式并发结束后 RSS 从 65 MiB 回落到 45 MiB。
+- 本地实测（amd64 模拟 + mock 上游，默认 8/4 闸门）：4×32 MiB 峰值 cgroup 122 MiB，8×8 MiB 峰值 143 MiB，12 路混合大请求峰值约 378 MiB（未 OOM）；4 路 4.5 MiB 流式并发结束后 RSS 从 65 MiB 回落到 45 MiB。
 - `docker stats` 的 MEM USAGE 含可回收的 page cache（数据库读取），不等同于进程 RSS；判断泄漏看 `/proc/1/status` 的 VmRSS 与 cgroup `anon`。
 - 并发预期：小 JSON 请求本地压测约 900–2500 req/s（受模拟环境与上游限制）；并发连接主要受 CPU、文件描述符与上游限流约束，大请求由闸门限制，不随客户端并发线性涨内存。
 

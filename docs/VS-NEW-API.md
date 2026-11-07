@@ -95,7 +95,7 @@
 | chat → 生图桥接 | 纯生图模型（如 `sensenova-u1.5-lite`）收到 chat 请求会报错 | `options.ImageModels` 白名单命中的模型，自动把最后一条 user 文本转成 `/v1/images/generations`，把图片包成 chat completion（流式退化为单块 SSE）返回 |
 | 游乐场生图呈现 | 上游 Playground 只做聊天，纯生图模型需要在外部直接调 `/v1/images/generations` | 统一为普通聊天界面：模型/分组选择器不变，生图模型返回的图片直接出现在对话消息中；历史只保留占位标记，避免 7 MB 级 base64 撑爆 localStorage |
 | 流式内存纪律 | 上游存在为统计 completion tokens 缓冲整段流式的已知缺陷（部分 issue 仍 Open） | 只保留一个 SSE 事件的缓冲，usage 增量提取；断连立即取消上游；队列有界（日志 20,000）、请求体 32 MiB、SSE 事件 1 MiB、超大非流式响应改走流式透传 |
-| 大请求体背压 | 无显式闸门，并发大请求线性占用内存 | 2–8 MiB 最多 2 并发、>8 MiB 最多 1 并发；大块缓冲 mmap 后直接归还；日志批、连接池与空闲堆都有上界 |
+| 大请求体背压 | 无显式闸门，并发大请求线性占用内存 | 默认 2–8 MiB 最多 8 并发、>8 MiB 最多 4 并发，系统设置可调；大块缓冲 mmap 后直接归还；日志批、连接池与空闲堆都有上界 |
 | 登录内存 | Go 版本按需分配通过 GC 归还 | glibc `M_MMAP_THRESHOLD=16 MiB`、`M_TRIM_THRESHOLD=128 KiB`、`M_ARENA_MAX=2`，KDF 放 `spawn_blocking` 且信号量限 2；12 路并发登录从 303 MiB 降到 24.8 MiB |
 | 无 Redis 的轮询与缓存 | Redis 承担多 Key 轮询、令牌缓存、跨节点一致性 | 进程内缓存；`channel_info.multi_key_mode` 的 `random` / `polling` 都在进程内完成，轮询游标加锁后 O(1) 推进，不落库、重启从第一个 Key 开始（不影响正确性） |
 | 用量口径 | 余额/金额列贯穿日志与看板 | 日志 `quota=0`，前端金额列替换为 Token/耗时/次数；`quota_data` 与用户 `used_quota` 不写 |

@@ -158,11 +158,35 @@ fn option_value(list: &Value, key: &str) -> String {
 }
 
 #[tokio::test]
+async fn body_gate_limits_are_configurable_and_validated() {
+    let (app, _, _, _) = setup(1).await;
+    let body = put_option(
+        &app,
+        json!({"key": "BodyGateBigConcurrency", "value": 12}),
+    )
+    .await;
+    assert_eq!(body["success"], true, "{body}");
+    let list = get_json(&app, "/api/option/").await;
+    assert_eq!(option_value(&list, "BodyGateBigConcurrency"), "12");
+
+    for bad in [json!(0), json!(65), json!("x")] {
+        let body = put_option(
+            &app,
+            json!({"key": "BodyGateHugeConcurrency", "value": bad}),
+        )
+        .await;
+        assert_eq!(body["success"], false, "{body}");
+    }
+}
+
+#[tokio::test]
 async fn lists_only_supported_keys_with_defaults() {
     let (app, _, _, _) = setup(1).await;
     let list = get_json(&app, "/api/option/").await;
     let rows = list["data"].as_array().unwrap();
-    assert_eq!(rows.len(), 8);
+    assert_eq!(rows.len(), 10);
+    assert_eq!(option_value(&list, "BodyGateBigConcurrency"), "8");
+    assert_eq!(option_value(&list, "BodyGateHugeConcurrency"), "4");
     assert_eq!(option_value(&list, "ImageModels"), "");
     assert_eq!(option_value(&list, "SystemName"), "solo-new-api");
     assert_eq!(option_value(&list, "Logo"), "");

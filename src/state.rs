@@ -69,6 +69,7 @@ impl AppState {
         jwt_secret: Vec<u8>,
         log_tx: Option<tokio::sync::mpsc::Sender<crate::logging::LogEntry>>,
     ) -> Self {
+        let settings = crate::settings::Settings::from_options(&caches.options);
         Self {
             config,
             pool,
@@ -78,13 +79,19 @@ impl AppState {
             routing: Arc::new(crate::routing::RoutingState::new()),
             log_tx,
             export_slots: Arc::new(Mutex::new(HashSet::new())),
-            body_gate: Arc::new(crate::mem::BodyGate::default()),
+            body_gate: Arc::new(crate::mem::BodyGate::new(
+                settings.body_gate_big,
+                settings.body_gate_huge,
+            )),
         }
     }
 
     pub async fn reload_caches(&self) -> Result<(), sqlx::Error> {
         let fresh = Caches::load(&self.pool).await?;
+        let settings = crate::settings::Settings::from_options(&fresh.options);
         *self.caches.write().expect("cache lock") = fresh;
+        self.body_gate
+            .set_limits(settings.body_gate_big, settings.body_gate_huge);
         Ok(())
     }
 }
