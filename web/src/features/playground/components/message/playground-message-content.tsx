@@ -17,7 +17,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { ReactNode } from 'react'
+import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
+import type { ImageNode } from 'stream-markdown-parser'
 
 import {
   CodeBlock,
@@ -31,6 +33,7 @@ import {
   ReasoningTrigger,
 } from '@/components/ai-elements/reasoning'
 import { Response } from '@/components/ai-elements/response'
+import { ResponseImage } from '@/components/ai-elements/response-renderer-image'
 import { Shimmer } from '@/components/ai-elements/shimmer'
 import {
   Source,
@@ -47,6 +50,10 @@ import {
   isErrorMessage,
   type MessageAlignment,
 } from '../../lib'
+import {
+  splitMessageImages,
+  type MessageImageSegment,
+} from '../../lib/message/message-images'
 import { getMessageContentStyles } from '../../lib/message/message-styles'
 import type { Message } from '../../types'
 import { MessageError } from './message-error'
@@ -59,6 +66,17 @@ type PlaygroundMessageContentProps = {
   isSourceVisible?: boolean
   message: Message
   versionContent: string
+}
+
+function toImageNode(segment: Extract<MessageImageSegment, { kind: 'image' }>) {
+  const node: ImageNode = {
+    type: 'image',
+    src: segment.src,
+    alt: segment.alt,
+    title: null,
+    raw: '',
+  }
+  return node
 }
 
 export function PlaygroundMessageContent({
@@ -83,6 +101,10 @@ export function PlaygroundMessageContent({
   const isMessageFinal =
     message.status !== MESSAGE_STATUS.LOADING &&
     message.status !== MESSAGE_STATUS.STREAMING
+  const segments = useMemo(
+    () => splitMessageImages(displayContent),
+    [displayContent]
+  )
 
   return (
     <div
@@ -155,7 +177,41 @@ export function PlaygroundMessageContent({
               variant='flat'
               className={cn(getMessageContentStyles())}
             >
-              <Response final={isMessageFinal}>{displayContent}</Response>
+              {segments.map((segment, index) => {
+                if (segment.kind === 'text') {
+                  if (!segment.text.trim()) {
+                    return null
+                  }
+                  return (
+                    <Response final={isMessageFinal} key={index}>
+                      {segment.text}
+                    </Response>
+                  )
+                }
+                if (segment.kind === 'image') {
+                  return (
+                    <ResponseImage key={index} node={toImageNode(segment)} />
+                  )
+                }
+                if (segment.kind === 'pending-image') {
+                  return (
+                    <div className='flex items-center gap-2 py-2' key={index}>
+                      <Loader />
+                      <Shimmer className='text-sm' duration={1}>
+                        {t('Generating image...')}
+                      </Shimmer>
+                    </div>
+                  )
+                }
+                return (
+                  <p
+                    className='text-muted-foreground text-xs italic'
+                    key={index}
+                  >
+                    {t('Generated image is not kept in local history.')}
+                  </p>
+                )
+              })}
             </MessageContent>
           )}
           <MessageMetadata alignment={alignment} message={message} />

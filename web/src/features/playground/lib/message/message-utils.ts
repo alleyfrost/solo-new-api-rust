@@ -25,6 +25,7 @@ import type {
   ChatCompletionMessage,
   ContentPart,
 } from '../../types'
+import { stripMessageImagesForStorage } from './message-images'
 
 /**
  * Create a new message version
@@ -151,12 +152,15 @@ export function getTextContent(content: string | ContentPart[]): string {
 
 /**
  * Format message for API request
+ *
+ * Inline image payloads stay in the conversation for display only; sending
+ * megabytes of base64 back upstream buys nothing, so they travel as a marker.
  */
 export function formatMessageForAPI(message: Message): ChatCompletionMessage {
   const currentVersion = getCurrentVersion(message)
   return {
     role: message.from,
-    content: currentVersion.content,
+    content: stripMessageImagesForStorage(currentVersion.content),
   }
 }
 

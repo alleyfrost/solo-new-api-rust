@@ -16,21 +16,23 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useQuery } from '@tanstack/react-query'
 import type { TFunction } from 'i18next'
 import { Building2 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
+import { MultiSelect } from '@/components/multi-select'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { TitledCard } from '@/components/ui/titled-card'
+import { getUserModels } from '@/lib/api'
 import { handleServerError } from '@/lib/handle-server-error'
 
 import {
   ADDRESS_MAX_LENGTH,
-  IMAGE_MODELS_MAX_LENGTH,
   LOGO_MAX_LENGTH,
   MAX_IMAGE_MODELS,
   NOTICE_MAX_LENGTH,
@@ -53,6 +55,13 @@ const EMPTY: SiteValues = {
   serverAddress: '',
   notice: '',
   imageModels: '',
+}
+
+function splitModels(value: string): string[] {
+  return value
+    .split(',')
+    .map((name) => name.trim())
+    .filter(Boolean)
 }
 
 function validate(values: SiteValues, t: TFunction) {
@@ -81,10 +90,7 @@ function validate(values: SiteValues, t: TFunction) {
       max: NOTICE_MAX_LENGTH,
     })
   }
-  const models = values.imageModels
-    .split(',')
-    .map((name) => name.trim())
-    .filter(Boolean)
+  const models = splitModels(values.imageModels)
   if (models.length > MAX_IMAGE_MODELS) {
     return t('At most {{max}} image models', { max: MAX_IMAGE_MODELS })
   }
@@ -101,6 +107,24 @@ export function SiteCard() {
   const { values: loaded, isLoading } = useOptions()
   const save = useSaveOptions()
   const [values, setValues] = useState<SiteValues>(EMPTY)
+
+  const modelsQuery = useQuery({
+    queryKey: ['settings', 'image-models', 'available'],
+    queryFn: async () => {
+      const response = await getUserModels()
+      return response.success && Array.isArray(response.data)
+        ? response.data
+        : []
+    },
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const imageModels = splitModels(values.imageModels)
+  const imageModelOptions = useMemo(() => {
+    const selected = splitModels(values.imageModels)
+    const names = new Set([...(modelsQuery.data ?? []), ...selected])
+    return [...names].map((model) => ({ label: model, value: model }))
+  }, [modelsQuery.data, values.imageModels])
 
   useEffect(() => {
     setValues({
@@ -125,13 +149,9 @@ export function SiteCard() {
   if (values.notice !== loaded[OPTION_KEYS.notice]) {
     changes.push([OPTION_KEYS.notice, values.notice])
   }
-  const imageModels = values.imageModels
-    .split(',')
-    .map((name) => name.trim())
-    .filter(Boolean)
-    .join(',')
-  if (imageModels !== loaded[OPTION_KEYS.imageModels]) {
-    changes.push([OPTION_KEYS.imageModels, imageModels])
+  const normalizedImageModels = splitModels(values.imageModels).join(',')
+  if (normalizedImageModels !== loaded[OPTION_KEYS.imageModels]) {
+    changes.push([OPTION_KEYS.imageModels, normalizedImageModels])
   }
 
   const handleSave = async () => {
@@ -250,17 +270,25 @@ export function SiteCard() {
             >
               {t('Image Models')}
             </label>
-            <Input
+            <MultiSelect
               id='settings-image-models'
-              value={values.imageModels}
-              maxLength={IMAGE_MODELS_MAX_LENGTH}
-              placeholder='sensenova-u1.5-lite'
-              onChange={field('imageModels')}
+              options={imageModelOptions}
+              selected={imageModels}
+              onChange={(models) =>
+                setValues((prev) => ({
+                  ...prev,
+                  imageModels: models.join(','),
+                }))
+              }
+              placeholder={t('Select models or add custom ones')}
+              allowCreate
+              createLabel='Add custom model "{{value}}"'
+              maxVisibleChips={8}
               disabled={save.isPending}
             />
             <p className='text-muted-foreground text-xs'>
               {t(
-                'Comma-separated models that only generate images. Chat requests to them are turned into image generation.'
+                'Only image-generation models. Chat requests to them are turned into image generation.'
               )}
             </p>
           </div>

@@ -9,7 +9,7 @@ use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use sqlx::SqlitePool;
 use tower::ServiceExt;
-use wiremock::matchers::{body_partial_json, method, path};
+use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use solo_new_api_rust::auth::session::{Claims, issue_access};
@@ -85,7 +85,7 @@ async fn setup(base_url: &str) -> Fixture {
             key: "sk-up".into(),
             status: 1,
             name: "c".into(),
-            models: "m1,img-model".into(),
+            models: "m1".into(),
             group: "default".into(),
             base_url: Some(base_url.into()),
             priority: Some(0),
@@ -113,19 +113,17 @@ async fn setup(base_url: &str) -> Fixture {
         },
     );
     for group in ["default", "team"] {
-        for model in ["m1", "img-model"] {
-            let ability = AbilityRow {
-                group: group.into(),
-                model: model.into(),
-                channel_id: 3,
-                enabled: true,
-                priority: Some(0),
-                weight: Some(0),
-            };
-            caches
-                .abilities
-                .insert((group.to_string(), model.to_string()), vec![ability]);
-        }
+        let ability = AbilityRow {
+            group: group.into(),
+            model: "m1".into(),
+            channel_id: 3,
+            enabled: true,
+            priority: Some(0),
+            weight: Some(0),
+        };
+        caches
+            .abilities
+            .insert((group.to_string(), "m1".to_string()), vec![ability]);
     }
 
     let (tx, rx) = solo_new_api_rust::logging::channel(64);
@@ -157,10 +155,6 @@ async fn setup(base_url: &str) -> Fixture {
         .route(
             "/pg/chat/completions",
             axum::routing::post(solo_new_api_rust::relay::playground::chat_completions),
-        )
-        .route(
-            "/pg/images/generations",
-            axum::routing::post(solo_new_api_rust::relay::playground::image_generations),
         )
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
@@ -314,42 +308,4 @@ async fn playground_needs_a_session() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
     assert!(server.received_requests().await.unwrap().is_empty());
-}
-
-#[tokio::test]
-async fn playground_image_endpoint_forwards_the_images_body() {
-    let server = MockServer::start().await;
-    Mock::given(method("POST"))
-        .and(path("/v1/images/generations"))
-        .and(body_partial_json(json!({
-            "model": "img-model",
-            "prompt": "画一只猫",
-            "size": "2048x2048"
-        })))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(
-            r#"{"created":1,"data":[{"url":"https://img.example/cat.png"}],"usage":{"input_tokens":3,"output_tokens":4,"total_tokens":7}}"#,
-            "application/json",
-        ))
-        .mount(&server)
-        .await;
-
-    let fixture = setup(&server.uri()).await;
-    let (status, body, _) = send_to(
-        fixture,
-        "/pg/images/generations",
-        json!({"model": "img-model", "group": "default", "prompt": "画一只猫", "size": "2048x2048"}),
-    )
-    .await;
-    let text = String::from_utf8_lossy(&body);
-    assert_eq!(status, StatusCode::OK, "{text}");
-    assert!(text.contains("https://img.example/cat.png"), "{text}");
-
-    let reqs = server.received_requests().await.unwrap();
-    assert_eq!(reqs.len(), 1);
-    let sent: Value = serde_json::from_slice(&reqs[0].body).unwrap();
-    assert!(
-        sent.get("group").is_none(),
-        "group 只是选路字段，不能转发给上游"
-    );
-    assert_eq!(sent["prompt"], "画一只猫");
 }

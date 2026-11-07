@@ -7,7 +7,7 @@ use serde_json::Value;
 use crate::auth::admin::AdminContext;
 use crate::auth::token::TokenContext;
 use crate::relay::forward::{self, Wire};
-use crate::relay::{openai_error, passthrough};
+use crate::relay::openai_error;
 use crate::state::AppState;
 
 /// 会话凭证不能出现在上游请求里；`cookie` 不在 hop-by-hop 名单内，需在此显式剥离。
@@ -114,27 +114,6 @@ pub async fn chat_completions(
         prepared.headers,
         prepared.body,
         Wire::Chat,
-    )
-    .await
-}
-
-/// 游乐场生图：选中的是生图模型时，前端直接发 `/v1/images/generations` 形状的请求。
-pub async fn image_generations(
-    State(state): State<AppState>,
-    Extension(admin): Extension<AdminContext>,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Response {
-    let prepared = match prepare(&state, &admin, headers, body) {
-        Ok(prepared) => prepared,
-        Err(response) => return *response,
-    };
-    passthrough::relay(
-        state,
-        prepared.ctx,
-        prepared.headers,
-        prepared.body,
-        "/v1/images/generations",
     )
     .await
 }

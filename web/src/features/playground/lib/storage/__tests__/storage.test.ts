@@ -22,6 +22,7 @@ import { useAuthStore } from '@/stores/auth-store'
 
 import { STORAGE_KEYS } from '../../../constants'
 import type { Message } from '../../../types'
+import { OMITTED_IMAGE_MARKER } from '../../message/message-images'
 import {
   clearPlaygroundData,
   loadConfig,
@@ -106,4 +107,27 @@ test('storage calls without a signed-in user do not persist shared data', () => 
   expect(loadMessages()).toBeNull()
   expect(loadParameterEnabled()).toEqual({})
   expect(localStorage.length).toBe(0)
+})
+
+test('persisted history keeps an image marker instead of the base64 payload', () => {
+  useAuthStore.getState().auth.setUser({ id: 1, username: 'A', role: 1 })
+  const imageMessage: Message = {
+    key: 'image-chat',
+    from: 'assistant',
+    versions: [
+      {
+        id: 'image-version',
+        content: `生成完成\n\n![image](data:image/png;base64,${'A'.repeat(2048)})`,
+      },
+    ],
+  }
+
+  saveMessages([imageMessage])
+
+  const saved = localStorage.getItem(`${STORAGE_KEYS.MESSAGES}:1`)
+  expect(saved).toContain(OMITTED_IMAGE_MARKER)
+  expect(saved).not.toContain('base64')
+  expect(loadMessages()?.[0].versions[0].content).toBe(
+    `生成完成\n\n${OMITTED_IMAGE_MARKER}`
+  )
 })

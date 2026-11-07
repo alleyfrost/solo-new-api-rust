@@ -20,6 +20,7 @@ import { useAuthStore } from '@/stores/auth-store'
 
 import { MESSAGE_STATUS, STORAGE_KEYS } from '../../constants'
 import type { PlaygroundConfig, ParameterEnabled, Message } from '../../types'
+import { stripMessageImagesForStorage } from '../message/message-images'
 import {
   finalizeMessage,
   isAssistantMessagePending,
@@ -109,6 +110,25 @@ function trimMessages(messages: Message[]): Message[] {
   }
 
   return messages.slice(-MAX_STORED_MESSAGES)
+}
+
+/**
+ * Base64 image payloads are several megabytes each and would exceed the
+ * localStorage quota, so history keeps only a marker for them.
+ */
+function withoutInlineImages(message: Message): Message {
+  let changed = false
+  const versions = message.versions.map((version) => {
+    const content = stripMessageImagesForStorage(version.content)
+    if (content === version.content) {
+      return version
+    }
+
+    changed = true
+    return { ...version, content }
+  })
+
+  return changed ? { ...message, versions } : message
 }
 
 function getMessageSize(message: Message): number {
@@ -391,7 +411,7 @@ export function loadMessages(): Message[] | null {
  */
 export function saveMessages(messages: Message[]): void {
   try {
-    const trimmed = trimMessages(messages)
+    const trimmed = trimMessages(messages).map(withoutInlineImages)
     const parsed = messagesSchema.parse(trimmed) as Message[]
     writeStoredValue(STORAGE_KEYS.MESSAGES, parsed)
   } catch (error) {
