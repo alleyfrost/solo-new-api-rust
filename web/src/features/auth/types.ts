@@ -70,6 +70,7 @@ export interface SystemStatus {
   version?: string
   system_name?: string
   logo?: string
+  image_models?: string[]
   display_in_currency?: boolean
   display_token_stat_enabled?: boolean
   quota_per_unit?: number

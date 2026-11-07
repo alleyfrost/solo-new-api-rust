@@ -148,6 +148,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             "/pg/chat/completions",
             axum::routing::post(solo_new_api_rust::relay::playground::chat_completions),
         )
+        .route(
+            "/pg/images/generations",
+            axum::routing::post(solo_new_api_rust::relay::playground::image_generations),
+        )
         .layer(axum::extract::DefaultBodyLimit::max(
             config.max_request_bytes,
         ))

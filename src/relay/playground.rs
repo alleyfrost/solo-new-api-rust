@@ -7,7 +7,7 @@ use serde_json::Value;
 use crate::auth::admin::AdminContext;
 use crate::auth::token::TokenContext;
 use crate::relay::forward::{self, Wire};
-use crate::relay::openai_error;
+use crate::relay::{openai_error, passthrough};
 use crate::state::AppState;
 
 /// 会话凭证不能出现在上游请求里；`cookie` 不在 hop-by-hop 名单内，需在此显式剥离。
@@ -26,18 +26,25 @@ fn group_known(state: &AppState, group: &str) -> bool {
     caches.abilities.keys().any(|(g, _)| g == group)
 }
 
-pub async fn chat_completions(
-    State(state): State<AppState>,
-    Extension(admin): Extension<AdminContext>,
+/// 把游乐场请求整理成可直接转发的三件套：临时令牌上下文、剥掉凭证的请求头、去掉 `group` 的请求体。
+struct Prepared {
+    ctx: TokenContext,
     headers: HeaderMap,
     body: Bytes,
-) -> Response {
+}
+
+fn prepare(
+    state: &AppState,
+    admin: &AdminContext,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Prepared, Box<Response>> {
     let mut payload = match serde_json::from_slice::<Value>(&body) {
         Ok(value) => value,
-        Err(_) => return bad_request("invalid JSON body"),
+        Err(_) => return Err(Box::new(bad_request("invalid JSON body"))),
     };
     let Some(obj) = payload.as_object_mut() else {
-        return bad_request("body must be a JSON object");
+        return Err(Box::new(bad_request("body must be a JSON object")));
     };
     // `group` 只用于选路，不属于上游协议字段，必须剥掉再转发。
     let requested = obj
@@ -56,12 +63,12 @@ pub async fn chat_completions(
     };
     let group = if requested.is_empty() || requested == "auto" {
         user_group
-    } else if requested == user_group {
-        requested
-    } else if group_known(&state, &requested) {
+    } else if requested == user_group || group_known(state, &requested) {
         requested
     } else {
-        return forbidden(format!("no access to group {requested}"));
+        return Err(Box::new(forbidden(format!(
+            "no access to group {requested}"
+        ))));
     };
 
     let mut sanitized = headers.clone();
@@ -69,11 +76,11 @@ pub async fn chat_completions(
         sanitized.remove(name);
     }
     let Ok(outbound) = serde_json::to_vec(&payload) else {
-        return openai_error(
+        return Err(Box::new(openai_error(
             StatusCode::INTERNAL_SERVER_ERROR,
             "request re-encode failed",
             "internal_error",
-        );
+        )));
     };
     // 与 Go 侧 controller.Playground 一致：临时令牌名 playground-<group>，日志按它归类。
     let ctx = TokenContext {
@@ -84,5 +91,50 @@ pub async fn chat_completions(
         model_limits_enabled: false,
         model_limits: String::new(),
     };
-    forward::relay(state, ctx, sanitized, Bytes::from(outbound), Wire::Chat).await
+    Ok(Prepared {
+        ctx,
+        headers: sanitized,
+        body: Bytes::from(outbound),
+    })
+}
+
+pub async fn chat_completions(
+    State(state): State<AppState>,
+    Extension(admin): Extension<AdminContext>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let prepared = match prepare(&state, &admin, headers, body) {
+        Ok(prepared) => prepared,
+        Err(response) => return *response,
+    };
+    forward::relay(
+        state,
+        prepared.ctx,
+        prepared.headers,
+        prepared.body,
+        Wire::Chat,
+    )
+    .await
+}
+
+/// 游乐场生图：选中的是生图模型时，前端直接发 `/v1/images/generations` 形状的请求。
+pub async fn image_generations(
+    State(state): State<AppState>,
+    Extension(admin): Extension<AdminContext>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let prepared = match prepare(&state, &admin, headers, body) {
+        Ok(prepared) => prepared,
+        Err(response) => return *response,
+    };
+    passthrough::relay(
+        state,
+        prepared.ctx,
+        prepared.headers,
+        prepared.body,
+        "/v1/images/generations",
+    )
+    .await
 }

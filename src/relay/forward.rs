@@ -280,6 +280,22 @@ pub async fn relay(
         .get("stream")
         .and_then(Value::as_bool)
         .unwrap_or(false);
+    // 生图模型只有 /v1/images/generations；用 chat 请求它时转成生图调用并包成 completion。
+    if client == Wire::Chat
+        && crate::settings::Settings::load(&state)
+            .await
+            .is_image_model(&origin_model)
+    {
+        return crate::relay::image_bridge::relay(
+            state,
+            ctx,
+            headers,
+            origin_model,
+            &payload,
+            stream,
+        )
+        .await;
+    }
     let wants_usage = if client == Wire::Chat {
         payload
             .pointer("/stream_options/include_usage")

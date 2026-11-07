@@ -30,7 +30,9 @@ import { handleServerError } from '@/lib/handle-server-error'
 
 import {
   ADDRESS_MAX_LENGTH,
+  IMAGE_MODELS_MAX_LENGTH,
   LOGO_MAX_LENGTH,
+  MAX_IMAGE_MODELS,
   NOTICE_MAX_LENGTH,
   OPTION_KEYS,
   SYSTEM_NAME_MAX_LENGTH,
@@ -42,6 +44,7 @@ type SiteValues = {
   logo: string
   serverAddress: string
   notice: string
+  imageModels: string
 }
 
 const EMPTY: SiteValues = {
@@ -49,6 +52,7 @@ const EMPTY: SiteValues = {
   logo: '',
   serverAddress: '',
   notice: '',
+  imageModels: '',
 }
 
 function validate(values: SiteValues, t: TFunction) {
@@ -77,6 +81,18 @@ function validate(values: SiteValues, t: TFunction) {
       max: NOTICE_MAX_LENGTH,
     })
   }
+  const models = values.imageModels
+    .split(',')
+    .map((name) => name.trim())
+    .filter(Boolean)
+  if (models.length > MAX_IMAGE_MODELS) {
+    return t('At most {{max}} image models', { max: MAX_IMAGE_MODELS })
+  }
+  if (models.some((name) => !/^[A-Za-z0-9._:/@+-]{1,128}$/.test(name))) {
+    return t(
+      'Image model names may only contain letters, digits and - . _ : / @ +'
+    )
+  }
   return null
 }
 
@@ -92,6 +108,7 @@ export function SiteCard() {
       logo: loaded[OPTION_KEYS.logo] ?? '',
       serverAddress: loaded[OPTION_KEYS.serverAddress] ?? '',
       notice: loaded[OPTION_KEYS.notice] ?? '',
+      imageModels: loaded[OPTION_KEYS.imageModels] ?? '',
     })
   }, [loaded])
 
@@ -107,6 +124,14 @@ export function SiteCard() {
   }
   if (values.notice !== loaded[OPTION_KEYS.notice]) {
     changes.push([OPTION_KEYS.notice, values.notice])
+  }
+  const imageModels = values.imageModels
+    .split(',')
+    .map((name) => name.trim())
+    .filter(Boolean)
+    .join(',')
+  if (imageModels !== loaded[OPTION_KEYS.imageModels]) {
+    changes.push([OPTION_KEYS.imageModels, imageModels])
   }
 
   const handleSave = async () => {
@@ -215,6 +240,28 @@ export function SiteCard() {
             />
             <p className='text-muted-foreground text-xs'>
               {t('Shown on the sign-in page.')}
+            </p>
+          </div>
+
+          <div className='space-y-1.5'>
+            <label
+              htmlFor='settings-image-models'
+              className='text-sm font-medium'
+            >
+              {t('Image Models')}
+            </label>
+            <Input
+              id='settings-image-models'
+              value={values.imageModels}
+              maxLength={IMAGE_MODELS_MAX_LENGTH}
+              placeholder='sensenova-u1.5-lite'
+              onChange={field('imageModels')}
+              disabled={save.isPending}
+            />
+            <p className='text-muted-foreground text-xs'>
+              {t(
+                'Comma-separated models that only generate images. Chat requests to them are turned into image generation.'
+              )}
             </p>
           </div>
 

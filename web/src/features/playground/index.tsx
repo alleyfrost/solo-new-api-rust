@@ -16,7 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useStatus } from '@/hooks/use-status'
+
 import { PlaygroundChat } from './components/chat/playground-chat'
+import { PlaygroundImage } from './components/image/playground-image'
 import { PlaygroundInput } from './components/input/playground-input'
 import {
   useChatHandler,
@@ -26,6 +29,7 @@ import {
 } from './hooks'
 
 export function Playground() {
+  const { status } = useStatus()
   const {
     config,
     parameterEnabled,
@@ -73,6 +77,27 @@ export function Playground() {
     setModels,
     updateConfig,
   })
+
+  const imageModels = Array.isArray(status?.image_models)
+    ? status.image_models
+    : []
+  const imageMode = imageModels.includes(config.model)
+
+  if (imageMode) {
+    return (
+      <div className='relative flex size-full min-h-0 flex-col overflow-hidden'>
+        <PlaygroundImage
+          model={config.model}
+          group={config.group}
+          models={models}
+          groups={groups}
+          isModelLoading={isLoadingModels}
+          onModelChange={(value) => updateConfig('model', value)}
+          onGroupChange={(value) => updateConfig('group', value)}
+        />
+      </div>
+    )
+  }
 
   return (
     <div className='relative flex size-full min-h-0 flex-col overflow-hidden'>

@@ -51,6 +51,22 @@ export interface Message {
   errorCode?: string | null
 }
 
+// Image generation payloads
+export interface ImageGenerationRequest {
+  model: string
+  group?: string
+  prompt: string
+  size?: string
+  n?: number
+  watermark?: boolean
+}
+
+export interface ImageGenerationResponse {
+  created?: number
+  data?: Array<{ b64_json?: string; url?: string }>
+  usage?: Record<string, unknown>
+}
+
 // API payload types
 export interface ChatCompletionMessage {
   role: MessageRole

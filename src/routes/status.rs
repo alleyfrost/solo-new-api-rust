@@ -15,6 +15,8 @@ pub async fn get_status(State(state): State<AppState>) -> Response {
         "system_name": settings.system_name,
         "logo": settings.logo,
         "server_address": settings.server_address,
+        // 前端据此把游乐场的输入区切到生图模式；模型本身仍由用户选择。
+        "image_models": settings.image_models,
         "self_use_mode_enabled": true,
         "password_login_enabled": true,
         "password_login_encryption_enabled": false,

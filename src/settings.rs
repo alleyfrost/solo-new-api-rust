@@ -11,8 +11,11 @@ pub const KEY_SERVER_ADDRESS: &str = "ServerAddress";
 pub const KEY_LOG_CONSUME_ENABLED: &str = "LogConsumeEnabled";
 pub const KEY_LOG_EXPORT_ENABLED: &str = "log_setting.user_export_enabled";
 pub const KEY_LOG_MAX_RANGE_DAYS: &str = "log_setting.max_range_days";
+/// 只会走 `/v1/images/generations` 的模型；列在这里的模型允许用 chat 请求触发生图。
+pub const KEY_IMAGE_MODELS: &str = "ImageModels";
 
-pub const KEYS: [&str; 7] = [
+pub const KEYS: [&str; 8] = [
+    KEY_IMAGE_MODELS,
     KEY_LOGO,
     KEY_LOG_CONSUME_ENABLED,
     KEY_LOG_EXPORT_ENABLED,
@@ -28,6 +31,9 @@ const MAX_NOTICE_CHARS: usize = 2000;
 const MAX_ADDRESS_CHARS: usize = 256;
 pub const MIN_RANGE_DAYS: i64 = 1;
 pub const MAX_RANGE_DAYS: i64 = 3650;
+pub const MAX_IMAGE_MODELS: usize = 64;
+pub const MAX_MODEL_NAME_CHARS: usize = 128;
+const MAX_IMAGE_MODELS_CHARS: usize = 4096;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Settings {
@@ -38,6 +44,7 @@ pub struct Settings {
     pub log_consume_enabled: bool,
     pub log_export_enabled: bool,
     pub log_max_range_days: i64,
+    pub image_models: Vec<String>,
 }
 
 impl Default for Settings {
@@ -50,6 +57,7 @@ impl Default for Settings {
             log_consume_enabled: true,
             log_export_enabled: true,
             log_max_range_days: crate::routes::admin::log::MAX_EXPORT_DAYS,
+            image_models: Vec::new(),
         }
     }
 }
@@ -87,6 +95,12 @@ impl Settings {
                 .and_then(|v| v.parse::<i64>().ok())
                 .filter(|v| (MIN_RANGE_DAYS..=MAX_RANGE_DAYS).contains(v))
                 .unwrap_or(defaults.log_max_range_days),
+            image_models: split_models(
+                options
+                    .get(KEY_IMAGE_MODELS)
+                    .map(String::as_str)
+                    .unwrap_or(""),
+            ),
         }
     }
 
@@ -98,6 +112,7 @@ impl Settings {
     /// 白名单键的当前生效值，供 `GET /api/option/` 返回；键名按字母序，前端可直接铺表单。
     pub fn entries(&self) -> Vec<(&'static str, String)> {
         vec![
+            (KEY_IMAGE_MODELS, self.image_models.join(",")),
             (KEY_LOGO, self.logo.clone()),
             (
                 KEY_LOG_CONSUME_ENABLED,
@@ -109,6 +124,10 @@ impl Settings {
             (KEY_SERVER_ADDRESS, self.server_address.clone()),
             (KEY_SYSTEM_NAME, self.system_name.clone()),
         ]
+    }
+
+    pub fn is_image_model(&self, model: &str) -> bool {
+        self.image_models.iter().any(|m| m == model)
     }
 }
 
@@ -164,8 +183,46 @@ pub fn normalize(key: &str, raw: &Value) -> Result<String, String> {
             }
             Ok(days.to_string())
         }
+        KEY_IMAGE_MODELS => {
+            let models = split_models(&text);
+            if models.len() > MAX_IMAGE_MODELS {
+                return Err(format!("At most {MAX_IMAGE_MODELS} image models"));
+            }
+            for model in &models {
+                if model.chars().count() > MAX_MODEL_NAME_CHARS {
+                    return Err(format!(
+                        "Each model name must be at most {MAX_MODEL_NAME_CHARS} characters"
+                    ));
+                }
+                if !model
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "-._:/@+".contains(c))
+                {
+                    return Err(format!("Invalid model name: {model}"));
+                }
+            }
+            let joined = models.join(",");
+            if joined.chars().count() > MAX_IMAGE_MODELS_CHARS {
+                return Err(format!(
+                    "Image model list must be at most {MAX_IMAGE_MODELS_CHARS} characters"
+                ));
+            }
+            Ok(joined)
+        }
         other => Err(format!("Option {other} is not supported")),
     }
+}
+
+fn split_models(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for item in text.split(',') {
+        let name = item.trim();
+        if name.is_empty() || out.iter().any(|existing| existing == name) {
+            continue;
+        }
+        out.push(name.to_string());
+    }
+    out
 }
 
 fn parse_bool(text: &str) -> Result<bool, String> {

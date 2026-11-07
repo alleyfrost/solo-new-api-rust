@@ -23,6 +23,8 @@ import { API_ENDPOINTS } from './constants'
 import type {
   ChatCompletionRequest,
   ChatCompletionResponse,
+  ImageGenerationRequest,
+  ImageGenerationResponse,
   ModelOption,
   GroupOption,
 } from './types'
@@ -37,6 +39,21 @@ export async function sendChatCompletion(
   const res = await api.post(API_ENDPOINTS.CHAT_COMPLETIONS, payload, {
     signal,
     skipErrorHandler: true,
+  } as Record<string, unknown>)
+  return res.data
+}
+
+/**
+ * Generate an image through the session-authenticated playground endpoint.
+ */
+export async function generateImage(
+  payload: ImageGenerationRequest,
+  signal?: AbortSignal
+): Promise<ImageGenerationResponse> {
+  const res = await api.post(API_ENDPOINTS.IMAGE_GENERATIONS, payload, {
+    signal,
+    skipErrorHandler: true,
+    timeout: 300_000,
   } as Record<string, unknown>)
   return res.data
 }

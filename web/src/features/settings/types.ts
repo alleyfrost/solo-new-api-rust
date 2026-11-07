@@ -38,6 +38,7 @@ export const OPTION_KEYS = {
   logo: 'Logo',
   notice: 'Notice',
   serverAddress: 'ServerAddress',
+  imageModels: 'ImageModels',
   logConsume: 'LogConsumeEnabled',
   logExport: 'log_setting.user_export_enabled',
   logRangeDays: 'log_setting.max_range_days',
@@ -47,5 +48,7 @@ export const SYSTEM_NAME_MAX_LENGTH = 64
 export const LOGO_MAX_LENGTH = 512
 export const NOTICE_MAX_LENGTH = 2000
 export const ADDRESS_MAX_LENGTH = 256
+export const IMAGE_MODELS_MAX_LENGTH = 4096
+export const MAX_IMAGE_MODELS = 64
 export const MIN_RANGE_DAYS = 1
 export const MAX_RANGE_DAYS = 3650

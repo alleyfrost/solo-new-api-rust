@@ -162,7 +162,8 @@ async fn lists_only_supported_keys_with_defaults() {
     let (app, _, _, _) = setup(1).await;
     let list = get_json(&app, "/api/option/").await;
     let rows = list["data"].as_array().unwrap();
-    assert_eq!(rows.len(), 7);
+    assert_eq!(rows.len(), 8);
+    assert_eq!(option_value(&list, "ImageModels"), "");
     assert_eq!(option_value(&list, "SystemName"), "solo-new-api");
     assert_eq!(option_value(&list, "Logo"), "");
     assert_eq!(option_value(&list, "LogConsumeEnabled"), "true");
@@ -246,6 +247,9 @@ async fn rejects_unknown_keys_and_bad_values() {
         json!({"key": "log_setting.max_range_days", "value": 0}),
         json!({"key": "log_setting.max_range_days", "value": 4000}),
         json!({"key": "Notice", "value": null}),
+        json!({"key": "ImageModels", "value": "sensenova u1.5"}),
+        json!({"key": "ImageModels", "value": "x".repeat(129)}),
+        json!({"key": "ImageModels", "value": (0..65).map(|i| format!("m{i}")).collect::<Vec<_>>().join(",")}),
     ] {
         let body = put_option(&app, payload.clone()).await;
         assert_eq!(body["success"], false, "{payload} -> {body}");
@@ -257,6 +261,38 @@ async fn rejects_unknown_keys_and_bad_values() {
         .await
         .unwrap();
     assert_eq!(rows, 0, "被拒的写入不能落库");
+}
+
+#[tokio::test]
+async fn normalizes_image_models_and_exposes_them_on_status() {
+    let (app, public, pool, _) = setup(1).await;
+
+    let body = put_option(
+        &app,
+        json!({"key": "ImageModels", "value": " sensenova-u1.5-lite , ,dall-e-3,sensenova-u1.5-lite "}),
+    )
+    .await;
+    assert_eq!(body["success"], true, "{body}");
+
+    let stored: String = sqlx::query_scalar("SELECT value FROM options WHERE key = 'ImageModels'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(stored, "sensenova-u1.5-lite,dall-e-3", "去空格、去重后落库");
+
+    let status = get_json(&public, "/api/status").await;
+    assert_eq!(
+        status["data"]["image_models"],
+        json!(["sensenova-u1.5-lite", "dall-e-3"])
+    );
+    assert_eq!(
+        option_value(&get_json(&app, "/api/option/").await, "ImageModels"),
+        "sensenova-u1.5-lite,dall-e-3"
+    );
+
+    put_option(&app, json!({"key": "ImageModels", "value": ""})).await;
+    let status = get_json(&public, "/api/status").await;
+    assert_eq!(status["data"]["image_models"], json!([]));
 }
 
 #[tokio::test]
