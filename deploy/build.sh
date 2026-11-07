@@ -26,6 +26,17 @@ rm -rf "$CONTEXT"
 mkdir -p "$CONTEXT"
 cp "$TARGET_DIR/release/solo-new-api-rust" "$CONTEXT/solo-new-api-rust"
 cp -R "$ROOT/web/dist" "$CONTEXT/web-dist"
-docker build --platform linux/amd64 -f "$ROOT/deploy/Dockerfile" -t "$IMAGE_TAG" "$CONTEXT"
+if ! docker build --platform linux/amd64 -f "$ROOT/deploy/Dockerfile" -t "$IMAGE_TAG" "$CONTEXT"; then
+    # 镜像源 403 时退回本机缓存的同版本基座，避免整个构建中断。
+    LOCAL_BASE="docker.1ms.run/debian:bookworm-slim"
+    if ! docker image inspect "$LOCAL_BASE" >/dev/null 2>&1; then
+        echo "==> docker build failed and $LOCAL_BASE is not cached" >&2
+        exit 1
+    fi
+    echo "==> retrying with cached base $LOCAL_BASE"
+    sed "1s|.*|FROM $LOCAL_BASE|" "$ROOT/deploy/Dockerfile" > "$CONTEXT/Dockerfile.local"
+    docker build --platform linux/amd64 -f "$CONTEXT/Dockerfile.local" -t "$IMAGE_TAG" "$CONTEXT"
+    rm -f "$CONTEXT/Dockerfile.local"
+fi
 
 echo "==> image ready: $IMAGE_TAG"
