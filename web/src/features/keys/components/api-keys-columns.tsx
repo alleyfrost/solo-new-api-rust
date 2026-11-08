@@ -135,6 +135,32 @@ export function useApiKeysColumns(now: number): ColumnDef<ApiKey>[] {
         size: 260,
       },
       {
+        id: 'usage',
+        header: t('Usage'),
+        cell: ({ row }) => {
+          const apiKey = row.original
+          if (!apiKey.used_tokens && !apiKey.request_count) {
+            return <span className='text-muted-foreground text-xs'>-</span>
+          }
+          return (
+            <div className='flex flex-col gap-0.5'>
+              <span className='font-mono text-xs font-medium tabular-nums'>
+                {apiKey.used_tokens.toLocaleString()} {t('Tokens')}
+              </span>
+              <span className='text-muted-foreground text-[11px] tabular-nums'>
+                {apiKey.request_count.toLocaleString()} {t('Requests')}
+              </span>
+              {apiKey.cache_read_tokens > 0 && (
+                <span className='text-muted-foreground/60 text-[11px] tabular-nums'>
+                  {t('Cache')}↓ {apiKey.cache_read_tokens.toLocaleString()}
+                </span>
+              )}
+            </div>
+          )
+        },
+        size: 150,
+      },
+      {
         accessorKey: 'group',
         header: t('Group'),
         cell: ({ row }) => {

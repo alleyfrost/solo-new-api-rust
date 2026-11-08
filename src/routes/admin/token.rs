@@ -2,6 +2,7 @@ use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use std::collections::HashMap;
 use rand::Rng;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -78,6 +79,49 @@ fn auto_groups_value(raw: &Option<String>) -> Value {
             .unwrap_or(Value::Null),
         _ => Value::Null,
     }
+}
+
+type TokenUsage = (i64, i64, i64);
+
+async fn token_usage(state: &AppState, user_id: i64) -> HashMap<i64, TokenUsage> {
+    let rows: Result<Vec<(i64, i64, i64, i64)>, _> = sqlx::query_as(
+        "SELECT q.token_id, COALESCE(SUM(q.count),0), COALESCE(SUM(q.token_used),0), \
+         COALESCE(SUM(q.cache_read_tokens),0) FROM quota_data q \
+         JOIN tokens t ON t.id=q.token_id \
+         WHERE t.user_id=? AND t.deleted_at IS NULL GROUP BY q.token_id",
+    )
+    .bind(user_id)
+    .fetch_all(&state.pool)
+    .await;
+    let rows = match rows {
+        Ok(rows) if !rows.is_empty() => rows,
+        _ => sqlx::query_as(
+            "SELECT token_id, COUNT(*), \
+             COALESCE(SUM(MAX(prompt_tokens,0)+MAX(completion_tokens,0)),0), \
+             COALESCE(SUM(CASE WHEN json_valid(other) THEN COALESCE(json_extract(other,'$.cache_tokens'),0) ELSE 0 END),0) \
+             FROM logs WHERE type=2 AND user_id=? AND token_id>0 GROUP BY token_id",
+        )
+        .bind(user_id)
+        .fetch_all(&state.pool)
+        .await
+        .unwrap_or_default(),
+    };
+    rows.into_iter()
+        .map(|(id, requests, tokens, cache)| (id, (requests, tokens, cache)))
+        .collect()
+}
+
+fn token_json_with_usage(
+    token: &TokenRow,
+    full_key: bool,
+    usage: Option<&TokenUsage>,
+) -> Value {
+    let mut value = token_json(token, full_key);
+    let (requests, used_tokens, cache_read) = usage.copied().unwrap_or((0, 0, 0));
+    value["request_count"] = json!(requests);
+    value["used_tokens"] = json!(used_tokens);
+    value["cache_read_tokens"] = json!(cache_read);
+    value
 }
 
 fn token_json(token: &TokenRow, full_key: bool) -> Value {
@@ -209,7 +253,11 @@ async fn list_page(
     .fetch_all(&state.pool)
     .await
     .map_err(internal)?;
-    let items: Vec<Value> = rows.iter().map(|t| token_json(t, false)).collect();
+    let usage = token_usage(state, user_id).await;
+    let items: Vec<Value> = rows
+        .iter()
+        .map(|t| token_json_with_usage(t, false, usage.get(&t.id)))
+        .collect();
     Ok(json_ok(&json!({
         "items": items,
         "total": count.0,

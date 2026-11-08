@@ -19,6 +19,7 @@ async fn setup() -> (Router, SqlitePool, AppState) {
         .unwrap();
     sqlx::query("CREATE TABLE channels (id INTEGER PRIMARY KEY, type INTEGER, `key` TEXT, status INTEGER, name TEXT, models TEXT, `group` TEXT, base_url TEXT, priority INTEGER, weight INTEGER, channel_info TEXT, model_mapping TEXT, header_override TEXT, created_time INTEGER, test_time INTEGER, response_time INTEGER, open_ai_organization TEXT, test_model TEXT, other TEXT, balance REAL, balance_updated_time INTEGER, used_quota INTEGER, status_code_mapping TEXT, auto_ban INTEGER, other_info TEXT, tag TEXT, setting TEXT, param_override TEXT, remark TEXT, settings TEXT)").execute(&pool).await.unwrap();
     sqlx::query("CREATE TABLE abilities (`group` TEXT, model TEXT, channel_id INTEGER, enabled INTEGER, priority INTEGER, weight INTEGER)").execute(&pool).await.unwrap();
+    sqlx::query("CREATE TABLE quota_data (id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,username TEXT DEFAULT '',model_name TEXT DEFAULT '',created_at INTEGER,use_group TEXT DEFAULT '',token_id INTEGER DEFAULT 0,channel_id INTEGER DEFAULT 0,node_name TEXT DEFAULT '',token_used INTEGER DEFAULT 0,count INTEGER DEFAULT 0,quota INTEGER DEFAULT 0,cache_read_tokens INTEGER DEFAULT 0,cache_creation_tokens INTEGER DEFAULT 0)").execute(&pool).await.unwrap();
     sqlx::query("CREATE TABLE options (`key` TEXT PRIMARY KEY, value TEXT)")
         .execute(&pool)
         .await
@@ -112,10 +113,18 @@ async fn token_crud_round_trip_and_cache_reload() {
     assert_eq!(key.len(), 48);
     assert!(state.caches.read().unwrap().token_by_key(&key).is_some());
 
+    sqlx::query("INSERT INTO quota_data (user_id,model_name,created_at,use_group,token_id,channel_id,token_used,count,cache_read_tokens) VALUES (1,'m1',100,'default',?,3,120,4,30)")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
     let (_, list) = call(&app, "GET", "/api/token/?p=1&size=10", None).await;
     assert_eq!(list["data"]["total"], 1);
     assert_eq!(list["data"]["items"][0]["name"], "cli");
     assert_eq!(list["data"]["items"][0]["key"], masked);
+    assert_eq!(list["data"]["items"][0]["request_count"], 4);
+    assert_eq!(list["data"]["items"][0]["used_tokens"], 120);
+    assert_eq!(list["data"]["items"][0]["cache_read_tokens"], 30);
 
     let (_, full) = call(&app, "POST", &format!("/api/token/{id}/key"), None).await;
     assert_eq!(full["data"]["key"], key);
