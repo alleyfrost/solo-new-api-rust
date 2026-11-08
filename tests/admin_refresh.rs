@@ -47,8 +47,11 @@ async fn refresh_rotates_token_then_logout_revokes() {
         .header("content-type", "application/json")
         .body(Body::from(r#"{"username":"alley","password":"secret123"}"#)).unwrap()).await.unwrap();
     assert_eq!(res.status(), 200);
-    let cookie = res.headers().get("set-cookie").unwrap().to_str().unwrap()
-        .split(';').next().unwrap().to_string();
+    let cookies: Vec<String> = res.headers().get_all("set-cookie")
+        .iter().map(|v| v.to_str().unwrap().to_string()).collect();
+    assert!(cookies.iter().any(|c| c.starts_with("new_api_has_session=1;")), "{cookies:?}");
+    let cookie = cookies.iter().find(|c| c.starts_with("new_api_refresh="))
+        .expect("refresh cookie").split(';').next().unwrap().to_string();
     let body = res.into_body().collect().await.unwrap().to_bytes();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     let token = v["data"]["access_token"].as_str().unwrap().to_string();
@@ -60,6 +63,9 @@ async fn refresh_rotates_token_then_logout_revokes() {
     let res = app.clone().oneshot(Request::builder().method("POST").uri("/api/user/auth/refresh")
         .header("cookie", cookie.clone()).body(Body::empty()).unwrap()).await.unwrap();
     assert_eq!(res.status(), 200);
+    let cookies: Vec<String> = res.headers().get_all("set-cookie")
+        .iter().map(|v| v.to_str().unwrap().to_string()).collect();
+    assert!(cookies.iter().any(|c| c.starts_with("new_api_has_session=1;")), "{cookies:?}");
     let body = res.into_body().collect().await.unwrap().to_bytes();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     let token2 = v["data"]["access_token"].as_str().unwrap().to_string();
@@ -68,6 +74,9 @@ async fn refresh_rotates_token_then_logout_revokes() {
     let res = app.clone().oneshot(Request::builder().method("POST").uri("/api/user/auth/logout")
         .header("cookie", cookie).body(Body::empty()).unwrap()).await.unwrap();
     assert_eq!(res.status(), 200);
+    let cookies: Vec<String> = res.headers().get_all("set-cookie")
+        .iter().map(|v| v.to_str().unwrap().to_string()).collect();
+    assert!(cookies.iter().any(|c| c.starts_with("new_api_has_session=;")), "{cookies:?}");
 
     let res = app.oneshot(Request::builder().uri("/api/user/self")
         .header("authorization", format!("Bearer {token2}"))

@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -7,6 +9,13 @@ import { pluginTailwindcss } from '@rsbuild/plugin-tailwindcss'
 import { tanstackRouter } from '@tanstack/router-plugin/rspack'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+// 静态图标没有内容哈希，用文件摘要做查询参数，替换图标后浏览器会重新拉取。
+const assetVersion = (file: string) =>
+  createHash('sha256')
+    .update(readFileSync(path.resolve(__dirname, file)))
+    .digest('hex')
+    .slice(0, 10)
 
 export default defineConfig(({ envMode }) => {
   const env = loadEnv({ mode: envMode, prefixes: ['VITE_'] })
@@ -56,6 +65,9 @@ export default defineConfig(({ envMode }) => {
       entry: {
         index: './src/main.tsx',
       },
+      define: {
+        __LOGO_VERSION__: JSON.stringify(assetVersion('./public/logo.png')),
+      },
     },
     resolve: {
       alias: {
@@ -64,7 +76,10 @@ export default defineConfig(({ envMode }) => {
     },
     html: {
       template: './index.html',
-      favicon: './public/favicon.ico',
+      templateParameters: {
+        faviconVersion: assetVersion('./public/favicon-brand.ico'),
+        logoVersion: assetVersion('./public/logo.png'),
+      },
     },
     server: {
       host: '0.0.0.0',
@@ -78,6 +93,14 @@ export default defineConfig(({ envMode }) => {
       distPath: {
         root: 'dist',
       },
+      // 品牌图标改用 favicon-brand.ico 供 HTML 引用；同时保留旧 URL /favicon.ico，
+      // 避免历史书签/客户端 404。
+      copy: [
+        {
+          from: path.resolve(__dirname, './public/favicon-brand.ico'),
+          to: 'favicon.ico',
+        },
+      ],
       // Rely on Rsbuild default legalComments ("linked" → per-chunk *.LICENSE.txt) in all modes.
       // Do not set "none" in production: that strips minifier-preserved third-party notices and
       // extracted license files, which some distributions require for open-source compliance.

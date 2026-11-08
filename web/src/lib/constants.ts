@@ -22,7 +22,11 @@ For commercial licensing, please contact support@quantumnous.com
 
 // System Configuration Defaults
 export const DEFAULT_SYSTEM_NAME = 'New API'
-export const DEFAULT_LOGO = '/logo.png'
+declare const __LOGO_VERSION__: string
+const logoVersion =
+  typeof __LOGO_VERSION__ === 'string' ? __LOGO_VERSION__ : 'dev'
+// 静态 logo 没有内容哈希，用构建期摘要避免浏览器把旧图标长期缓存在 tab 上。
+export const DEFAULT_LOGO = `/logo.png?v=${logoVersion}`
 
 // LocalStorage Keys
 export const STORAGE_KEYS = {

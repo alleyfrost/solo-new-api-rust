@@ -21,7 +21,6 @@ import axios from 'axios'
 import { t } from 'i18next'
 
 import { publishAuthSessionEvent } from '@/lib/auth-session-sync'
-import { hasSessionHint } from '@/lib/session-hint'
 import {
   useAuthStore,
   type AuthBootstrapState,
@@ -398,12 +397,8 @@ export async function resolveAuthentication(): Promise<RefreshOutcome> {
  * recover the moment authentication actually matters.
  */
 export async function bootstrapAuthentication(): Promise<RefreshOutcome> {
-  if (!currentValidAuthBundle() && !hasSessionHint()) {
-    const auth = useAuthStore.getState().auth
-    if (!auth.user && !auth.session) {
-      return { kind: 'anonymous' }
-    }
-  }
+  // 冷启动总是试探一次 refresh：提示 cookie 可能缺失或过期，
+  // 但 HttpOnly 的 Refresh Cookie 仍然有效，不能把“没有提示”当成未登录。
   return resolveAuthentication()
 }
 

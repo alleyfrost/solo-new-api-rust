@@ -26,6 +26,22 @@ fn set_cookie(sid: &str, refresh_plain: &str) -> String {
     format!("new_api_refresh={sid}.{refresh_plain}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800")
 }
 
+/// 前端冷启动只读这个非 HttpOnly 标记来决定是否值得发 refresh 请求；
+/// 缺少它会在强刷后被误判为未登录。
+fn session_hint_cookie() -> String {
+    "new_api_has_session=1; Path=/; SameSite=Lax; Max-Age=604800".to_string()
+}
+
+fn clear_hint_cookie() -> String {
+    "new_api_has_session=; Path=/; SameSite=Lax; Max-Age=0".to_string()
+}
+
+fn append_set_cookie(response: &mut Response, value: String) {
+    if let Ok(value) = axum::http::HeaderValue::from_str(&value) {
+        response.headers_mut().append("set-cookie", value);
+    }
+}
+
 pub async fn login(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -60,12 +76,11 @@ pub async fn login(
     let (bundle, refresh_plain) =
         session::create_session(&state.pool, &user, &ip, &ua, &state.jwt_secret).await?;
     let mut response = json_ok(&bundle);
-    response.headers_mut().insert(
-        "set-cookie",
-        set_cookie(&bundle.session.sid, &refresh_plain)
-            .parse()
-            .unwrap(),
+    append_set_cookie(
+        &mut response,
+        set_cookie(&bundle.session.sid, &refresh_plain),
     );
+    append_set_cookie(&mut response, session_hint_cookie());
     Ok(response)
 }
 
@@ -80,9 +95,8 @@ pub async fn refresh(
         session::refresh_session(&state.pool, &users, &sid, &secret, &state.jwt_secret).await?
     };
     let mut response = json_ok(&bundle);
-    response
-        .headers_mut()
-        .insert("set-cookie", set_cookie(&sid, &next_plain).parse().unwrap());
+    append_set_cookie(&mut response, set_cookie(&sid, &next_plain));
+    append_set_cookie(&mut response, session_hint_cookie());
     Ok(response)
 }
 
@@ -100,12 +114,11 @@ pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Respon
             .bind(session::now()).bind(&sid).execute(&state.pool).await;
     }
     let mut response = json_ok(&serde_json::json!({}));
-    response.headers_mut().insert(
-        "set-cookie",
-        "new_api_refresh=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"
-            .parse()
-            .unwrap(),
+    append_set_cookie(
+        &mut response,
+        "new_api_refresh=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0".to_string(),
     );
+    append_set_cookie(&mut response, clear_hint_cookie());
     response
 }
 
