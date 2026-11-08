@@ -1,13 +1,13 @@
+use crate::error::ApiError;
+use crate::model::UserRow;
+use argon2::{Argon2, PasswordHash, PasswordVerifier};
+use axum::http::HeaderMap;
+use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
-use argon2::{Argon2, PasswordHash, PasswordVerifier};
-use axum::http::HeaderMap;
-use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use crate::error::ApiError;
-use crate::model::UserRow;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
@@ -41,7 +41,10 @@ pub struct AuthBundle {
 }
 
 pub fn now() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as i64
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64
 }
 
 pub fn sha256_hex(bytes: &[u8]) -> String {
@@ -75,7 +78,11 @@ pub fn load_or_create_secret(path: &Path) -> std::io::Result<Vec<u8>> {
 pub fn verify_password(hash: &str, password: &str) -> bool {
     PasswordHash::new(hash)
         .ok()
-        .and_then(|parsed| Argon2::default().verify_password(password.as_bytes(), &parsed).ok())
+        .and_then(|parsed| {
+            Argon2::default()
+                .verify_password(password.as_bytes(), &parsed)
+                .ok()
+        })
         .is_some()
 }
 
@@ -147,8 +154,12 @@ pub fn hash_password(password: &str) -> Result<String, ApiError> {
 }
 
 pub fn issue_access(claims: &Claims, secret: &[u8]) -> Result<String, ApiError> {
-    encode(&Header::default(), claims, &EncodingKey::from_secret(secret))
-        .map_err(|e| ApiError::new(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+    encode(
+        &Header::default(),
+        claims,
+        &EncodingKey::from_secret(secret),
+    )
+    .map_err(|e| ApiError::new(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
 }
 
 pub fn decode_access(token: &str, secret: &[u8]) -> Result<Claims, ApiError> {
@@ -192,28 +203,49 @@ pub async fn create_session(
     .map_err(|e| ApiError::new(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     let access_exp = created + 15 * 60;
-    let claims = Claims { sub: user.id, sid: sid.clone(), ver: 1, uver: user.auth_version, iat: created, exp: access_exp };
+    let claims = Claims {
+        sub: user.id,
+        sid: sid.clone(),
+        ver: 1,
+        uver: user.auth_version,
+        iat: created,
+        exp: access_exp,
+    };
     let access_token = issue_access(&claims, secret)?;
-    Ok((AuthBundle {
-        access_token,
-        token_type: "Bearer",
-        access_expires_at: access_exp,
-        user: user_json(user),
-        session: SessionView {
-            sid, current: true, login_method: "password".into(),
-            ip: ip.into(), user_agent: user_agent.into(),
-            created_at: created, last_active_at: created, expires_at: expires,
+    Ok((
+        AuthBundle {
+            access_token,
+            token_type: "Bearer",
+            access_expires_at: access_exp,
+            user: user_json(user),
+            session: SessionView {
+                sid,
+                current: true,
+                login_method: "password".into(),
+                ip: ip.into(),
+                user_agent: user_agent.into(),
+                created_at: created,
+                last_active_at: created,
+                expires_at: expires,
+            },
         },
-    }, refresh_plain))
+        refresh_plain,
+    ))
 }
 
-pub fn parse_refresh_cookie(headers: &HeaderMap) -> Option<(String, String)> {
-    let cookie = headers.get("cookie")?.to_str().ok()?;
-    let value = cookie
+/// 兼容旧版 Path=/ 与本版 Path=/api/user/auth 同时存在的情况，返回全部候选。
+pub fn parse_refresh_cookies(headers: &HeaderMap) -> Vec<(String, String)> {
+    let Some(cookie) = headers.get("cookie").and_then(|v| v.to_str().ok()) else {
+        return Vec::new();
+    };
+    cookie
         .split(';')
-        .find_map(|part| part.trim().strip_prefix("new_api_refresh="))?;
-    let (sid, secret) = value.split_once('.')?;
-    Some((sid.to_string(), secret.to_string()))
+        .filter_map(|part| part.trim().strip_prefix("new_api_refresh="))
+        .filter_map(|value| {
+            let (sid, secret) = value.split_once('.')?;
+            Some((sid.to_string(), secret.to_string()))
+        })
+        .collect()
 }
 
 pub async fn refresh_session(
@@ -230,17 +262,41 @@ pub async fn refresh_session(
              FROM user_sessions WHERE sid=?"
         ).bind(sid).fetch_optional(pool).await
         .map_err(|e| ApiError::new(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    let Some((user_id, version, uver, status, refresh_hash, prev_hash, prev_until, method, ip, ua, created, _last, expires)) = row else {
-        return Err(ApiError::new(axum::http::StatusCode::UNAUTHORIZED, "Session expired!"));
+    let Some((
+        user_id,
+        version,
+        uver,
+        status,
+        refresh_hash,
+        prev_hash,
+        prev_until,
+        method,
+        ip,
+        ua,
+        created,
+        _last,
+        expires,
+    )) = row
+    else {
+        return Err(ApiError::new(
+            axum::http::StatusCode::UNAUTHORIZED,
+            "Session expired!",
+        ));
     };
     if status != "active" || expires <= now() {
-        return Err(ApiError::new(axum::http::StatusCode::UNAUTHORIZED, "Session expired!"));
+        return Err(ApiError::new(
+            axum::http::StatusCode::UNAUTHORIZED,
+            "Session expired!",
+        ));
     }
     let presented = sha256_hex(secret.as_bytes());
     let valid = presented == refresh_hash
         || (prev_until > now() && prev_hash.as_deref() == Some(presented.as_str()));
     if !valid {
-        return Err(ApiError::new(axum::http::StatusCode::UNAUTHORIZED, "Session expired!"));
+        return Err(ApiError::new(
+            axum::http::StatusCode::UNAUTHORIZED,
+            "Session expired!",
+        ));
     }
     use rand::RngCore;
     let mut next = vec![0u8; 32];
@@ -255,10 +311,18 @@ pub async fn refresh_session(
     .execute(pool).await
     .map_err(|e| ApiError::new(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    let user = users.get(&user_id)
+    let user = users
+        .get(&user_id)
         .ok_or_else(|| ApiError::new(axum::http::StatusCode::UNAUTHORIZED, "Session expired!"))?;
     let access_exp = active + 15 * 60;
-    let claims = Claims { sub: user_id, sid: sid.to_string(), ver: version, uver, iat: active, exp: access_exp };
+    let claims = Claims {
+        sub: user_id,
+        sid: sid.to_string(),
+        ver: version,
+        uver,
+        iat: active,
+        exp: access_exp,
+    };
     let access_token = issue_access(&claims, jwt_secret)?;
     let bundle = AuthBundle {
         access_token,
@@ -266,8 +330,14 @@ pub async fn refresh_session(
         access_expires_at: access_exp,
         user: user_json(user),
         session: SessionView {
-            sid: sid.to_string(), current: true, login_method: method,
-            ip, user_agent: ua, created_at: created, last_active_at: active, expires_at: expires,
+            sid: sid.to_string(),
+            current: true,
+            login_method: method,
+            ip,
+            user_agent: ua,
+            created_at: created,
+            last_active_at: active,
+            expires_at: expires,
         },
     };
     Ok((bundle, next_plain))

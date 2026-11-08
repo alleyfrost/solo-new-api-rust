@@ -23,7 +23,14 @@ fn client_ip(headers: &HeaderMap) -> String {
 }
 
 fn set_cookie(sid: &str, refresh_plain: &str) -> String {
-    format!("new_api_refresh={sid}.{refresh_plain}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800")
+    // 与 Go new-api 的路径保持一致，避免旧版遗留的 /api/user/auth cookie 一直排在前面。
+    format!(
+        "new_api_refresh={sid}.{refresh_plain}; Path=/api/user/auth; HttpOnly; SameSite=Lax; Max-Age=604800"
+    )
+}
+
+fn clear_legacy_refresh_cookie() -> String {
+    "new_api_refresh=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0".to_string()
 }
 
 /// 前端冷启动只读这个非 HttpOnly 标记来决定是否值得发 refresh 请求；
@@ -81,6 +88,7 @@ pub async fn login(
         set_cookie(&bundle.session.sid, &refresh_plain),
     );
     append_set_cookie(&mut response, session_hint_cookie());
+    append_set_cookie(&mut response, clear_legacy_refresh_cookie());
     Ok(response)
 }
 
@@ -88,36 +96,50 @@ pub async fn refresh(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
-    let (sid, secret) = session::parse_refresh_cookie(&headers)
-        .ok_or_else(|| ApiError::new(StatusCode::UNAUTHORIZED, "Session expired!"))?;
-    let (bundle, next_plain) = {
-        let users = state.caches.read().expect("cache lock").users.clone();
-        session::refresh_session(&state.pool, &users, &sid, &secret, &state.jwt_secret).await?
-    };
-    let mut response = json_ok(&bundle);
-    append_set_cookie(&mut response, set_cookie(&sid, &next_plain));
-    append_set_cookie(&mut response, session_hint_cookie());
-    Ok(response)
+    let candidates = session::parse_refresh_cookies(&headers);
+    if candidates.is_empty() {
+        return Err(ApiError::new(StatusCode::UNAUTHORIZED, "Session expired!"));
+    }
+    let users = state.caches.read().expect("cache lock").users.clone();
+    let mut last_error = ApiError::new(StatusCode::UNAUTHORIZED, "Session expired!");
+    for (sid, secret) in candidates {
+        match session::refresh_session(&state.pool, &users, &sid, &secret, &state.jwt_secret).await
+        {
+            Ok((bundle, next_plain)) => {
+                let mut response = json_ok(&bundle);
+                append_set_cookie(&mut response, set_cookie(&sid, &next_plain));
+                append_set_cookie(&mut response, session_hint_cookie());
+                append_set_cookie(&mut response, clear_legacy_refresh_cookie());
+                return Ok(response);
+            }
+            Err(error) => last_error = error,
+        }
+    }
+    Err(last_error)
 }
 
 pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let sid = session::parse_refresh_cookie(&headers)
+    let mut sids: Vec<String> = session::parse_refresh_cookies(&headers)
+        .into_iter()
         .map(|(sid, _)| sid)
-        .or_else(|| {
-            headers
-                .get("x-auth-session")
-                .and_then(|v| v.to_str().ok())
-                .map(|v| v.to_string())
-        });
-    if let Some(sid) = sid {
+        .collect();
+    if let Some(sid) = headers
+        .get("x-auth-session")
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.to_string())
+    {
+        sids.push(sid);
+    }
+    for sid in sids {
         let _ = sqlx::query("UPDATE user_sessions SET status='revoked', revoked_at=?, revoked_reason='logout' WHERE sid=?")
             .bind(session::now()).bind(&sid).execute(&state.pool).await;
     }
     let mut response = json_ok(&serde_json::json!({}));
     append_set_cookie(
         &mut response,
-        "new_api_refresh=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0".to_string(),
+        "new_api_refresh=; Path=/api/user/auth; HttpOnly; SameSite=Lax; Max-Age=0".to_string(),
     );
+    append_set_cookie(&mut response, clear_legacy_refresh_cookie());
     append_set_cookie(&mut response, clear_hint_cookie());
     response
 }
@@ -156,9 +178,18 @@ pub async fn self_info(
         map.insert("prompt_tokens".into(), serde_json::json!(usage.1));
         map.insert("completion_tokens".into(), serde_json::json!(usage.2));
         if let Some((setting, created_at, password)) = extra {
-            map.insert("setting".into(), serde_json::json!(setting.unwrap_or_default()));
-            map.insert("created_time".into(), serde_json::json!(created_at.unwrap_or(0)));
-            map.insert("has_password".into(), serde_json::json!(!password.is_empty()));
+            map.insert(
+                "setting".into(),
+                serde_json::json!(setting.unwrap_or_default()),
+            );
+            map.insert(
+                "created_time".into(),
+                serde_json::json!(created_at.unwrap_or(0)),
+            );
+            map.insert(
+                "has_password".into(),
+                serde_json::json!(!password.is_empty()),
+            );
         }
     }
     Ok(json_ok(&value))
@@ -218,9 +249,15 @@ pub async fn update_self(
     Extension(ctx): Extension<AdminContext>,
     axum::Json(body): axum::Json<serde_json::Value>,
 ) -> Result<Response, ApiError> {
-    let new_password = body.get("password").and_then(serde_json::Value::as_str).unwrap_or("");
+    let new_password = body
+        .get("password")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
     if !new_password.is_empty() {
-        let original = body.get("original_password").and_then(serde_json::Value::as_str).unwrap_or("");
+        let original = body
+            .get("original_password")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
         return change_password(&state, &ctx, new_password, original).await;
     }
     if let Some(display_name) = body.get("display_name").and_then(serde_json::Value::as_str) {
@@ -237,7 +274,13 @@ pub async fn update_self(
             .execute(&state.pool)
             .await
             .map_err(internal)?;
-        if let Some(user) = state.caches.write().expect("cache lock").users.get_mut(&ctx.user_id) {
+        if let Some(user) = state
+            .caches
+            .write()
+            .expect("cache lock")
+            .users
+            .get_mut(&ctx.user_id)
+        {
             user.display_name = Some(display_name.to_string());
         }
         return Ok(json_ok(&serde_json::Value::Null));
@@ -245,7 +288,10 @@ pub async fn update_self(
     let mut patch = serde_json::Map::new();
     for key in SETTING_KEYS {
         if let Some(value) = body.get(key).and_then(serde_json::Value::as_str) {
-            patch.insert(key.to_string(), serde_json::Value::String(value.to_string()));
+            patch.insert(
+                key.to_string(),
+                serde_json::Value::String(value.to_string()),
+            );
         }
     }
     if patch.is_empty() {
@@ -274,13 +320,12 @@ async fn write_setting_patch(
     user_id: i64,
     patch: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<(), ApiError> {
-    let current: Option<(Option<String>,)> = sqlx::query_as(
-        "SELECT setting FROM users WHERE id=? AND deleted_at IS NULL",
-    )
-    .bind(user_id)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(internal)?;
+    let current: Option<(Option<String>,)> =
+        sqlx::query_as("SELECT setting FROM users WHERE id=? AND deleted_at IS NULL")
+            .bind(user_id)
+            .fetch_optional(&state.pool)
+            .await
+            .map_err(internal)?;
     let Some((raw,)) = current else {
         return Err(ApiError::new(StatusCode::UNAUTHORIZED, "Session expired!"));
     };
@@ -322,7 +367,10 @@ async fn change_password(
     };
     // 账号原本没有密码时不设原密码门槛，与 Go 的 firstPassword 分支一致。
     if !hash.is_empty() && !session::verify_password_async(&hash, original_password).await {
-        return Err(ApiError::new(StatusCode::OK, "Original password is incorrect"));
+        return Err(ApiError::new(
+            StatusCode::OK,
+            "Original password is incorrect",
+        ));
     }
     let row: Option<(i64, String, String, String, String, i64, i64)> = sqlx::query_as(
         "SELECT version, status, login_method, ip, user_agent, created_at, expires_at FROM user_sessions WHERE sid=? AND user_id=?",
@@ -357,7 +405,13 @@ async fn change_password(
         .execute(&state.pool)
         .await
         .map_err(internal)?;
-    if let Some(user) = state.caches.write().expect("cache lock").users.get_mut(&ctx.user_id) {
+    if let Some(user) = state
+        .caches
+        .write()
+        .expect("cache lock")
+        .users
+        .get_mut(&ctx.user_id)
+    {
         user.password = new_hash;
         user.auth_version = next_version;
     }
@@ -409,18 +463,20 @@ pub async fn list_sessions(
     .map_err(internal)?;
     let mut views: Vec<session::SessionView> = rows
         .into_iter()
-        .map(|(sid, login_method, ip, user_agent, created_at, last_active_at, expires_at)| {
-            session::SessionView {
-                current: sid == ctx.sid,
-                sid,
-                login_method,
-                ip,
-                user_agent,
-                created_at,
-                last_active_at,
-                expires_at,
-            }
-        })
+        .map(
+            |(sid, login_method, ip, user_agent, created_at, last_active_at, expires_at)| {
+                session::SessionView {
+                    current: sid == ctx.sid,
+                    sid,
+                    login_method,
+                    ip,
+                    user_agent,
+                    created_at,
+                    last_active_at,
+                    expires_at,
+                }
+            },
+        )
         .collect();
     // Go 把当前会话排在列表首位。
     views.sort_by_key(|view| !view.current);
@@ -434,8 +490,10 @@ pub async fn revoke_session(
 ) -> Result<Response, ApiError> {
     let sid = sid.trim().to_string();
     if sid.is_empty() {
-        return Err(ApiError::new(StatusCode::BAD_REQUEST, "session id is required")
-            .with_code("AUTH_SESSION_ID_REQUIRED"));
+        return Err(
+            ApiError::new(StatusCode::BAD_REQUEST, "session id is required")
+                .with_code("AUTH_SESSION_ID_REQUIRED"),
+        );
     }
     let now = session::now();
     let result = sqlx::query(
@@ -458,7 +516,9 @@ pub async fn revoke_session(
     if current {
         response.headers_mut().insert(
             "set-cookie",
-            "new_api_refresh=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0".parse().unwrap(),
+            "new_api_refresh=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"
+                .parse()
+                .unwrap(),
         );
     }
     Ok(response)
@@ -478,6 +538,7 @@ pub async fn revoke_other_sessions(
     .execute(&state.pool)
     .await
     .map_err(internal)?;
-    Ok(json_ok(&serde_json::json!({ "revoked_count": result.rows_affected() })))
+    Ok(json_ok(
+        &serde_json::json!({ "revoked_count": result.rows_affected() }),
+    ))
 }
-
