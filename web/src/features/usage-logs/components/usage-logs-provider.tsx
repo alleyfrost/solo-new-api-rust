@@ -22,14 +22,12 @@ import { createContext, useContext, useState, type ReactNode } from 'react'
 import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 
-export type LogsViewScope = 'all' | 'self'
+// Single-user deployment: the admin view is always in effect; kept as a type for column keys.
+
 export type LogsViewAccess = 'self' | 'admin' | 'root'
 
-export function resolveLogsViewAccess(
-  role: number,
-  viewScope: LogsViewScope
-): LogsViewAccess {
-  if (viewScope !== 'all' || role < ROLE.ADMIN) return 'self'
+export function resolveLogsViewAccess(role: number): LogsViewAccess {
+  if (role < ROLE.ADMIN) return 'self'
   return role === ROLE.SUPER_ADMIN ? 'root' : 'admin'
 }
 
@@ -40,8 +38,6 @@ interface UsageLogsContextValue {
   setUserInfoDialogOpen: (open: boolean) => void
   sensitiveVisible: boolean
   setSensitiveVisible: (visible: boolean) => void
-  viewScope: LogsViewScope
-  setViewScope: (scope: LogsViewScope) => void
 }
 
 const UsageLogsContext = createContext<UsageLogsContextValue | undefined>(
@@ -52,7 +48,6 @@ export function UsageLogsProvider({ children }: { children: ReactNode }) {
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null)
   const [userInfoDialogOpen, setUserInfoDialogOpen] = useState(false)
   const [sensitiveVisible, setSensitiveVisible] = useState(true)
-  const [viewScope, setViewScope] = useState<LogsViewScope>('all')
 
   return (
     <UsageLogsContext.Provider
@@ -63,8 +58,6 @@ export function UsageLogsProvider({ children }: { children: ReactNode }) {
         setUserInfoDialogOpen,
         sensitiveVisible,
         setSensitiveVisible,
-        viewScope,
-        setViewScope,
       }}
     >
       {children}
@@ -81,27 +74,17 @@ export function useUsageLogsContext() {
 }
 
 /**
- * Resolves the effective admin scope for usage logs: whether the current
- * user is allowed to view all users' logs (`canManageScope`), and whether
- * their current view preference (`viewScope`) has that scope active
- * (`isAdminView`). Data fetching and admin-only UI should key off
- * `isAdminView` rather than raw role, so an admin who switches to "only
- * mine" is treated exactly like a regular user for that view.
+ * Usage logs are single-tenant: admins always get the all-users view, and
+ * the former "all / only mine" switch is gone. Data fetching and admin-only
+ * UI key off `isAdminView`, derived from the role alone.
  */
 export function useLogsViewScope() {
   const role = useAuthStore((state) => state.auth.user?.role ?? ROLE.GUEST)
-  const { viewScope, setViewScope } = useUsageLogsContext()
   const canManageScope = role >= ROLE.ADMIN
-  const viewAccess = resolveLogsViewAccess(role, viewScope)
+  // 单用户部署：不再区分“全部 / 仅自己”，管理员视图始终生效。
+  const viewAccess = resolveLogsViewAccess(role)
   const isAdminView = viewAccess !== 'self'
   const isRootView = viewAccess === 'root'
 
-  return {
-    canManageScope,
-    viewScope,
-    setViewScope,
-    isAdminView,
-    isRootView,
-    viewAccess,
-  }
+  return { canManageScope, isAdminView, isRootView, viewAccess }
 }
