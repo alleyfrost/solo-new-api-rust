@@ -25,9 +25,7 @@ import { CopyButton } from '@/components/copy-button'
 import { Dialog } from '@/components/dialog'
 import { GroupBadge } from '@/components/group-badge'
 import { StatusBadge, type StatusVariant } from '@/components/status-badge'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
-import { getUserAvatarFallback, getUserAvatarStyle } from '@/lib/avatar'
 import dayjs from '@/lib/dayjs'
 import { formatTimestampToDate } from '@/lib/format'
 
@@ -42,7 +40,7 @@ import { ModelBadge, ResponseModelDetails } from './model-badge'
 import { StreamTpsCell, TimingMetricsCell } from './timing-metrics-cell'
 import { useUsageLogsContext } from './usage-logs-provider'
 
-type FieldName = 'model' | 'user' | 'channel' | 'token' | 'group' | 'time'
+type FieldName = 'model' | 'channel' | 'token' | 'group' | 'time'
 type LogField = {
   label: string
   value: string
@@ -76,12 +74,6 @@ export function CommonLogMobileCard<TData>(props: {
       value: formatTimestampToDate(log.created_at),
       visible: props.cells.has('created_at'),
     },
-    user: {
-      label: t('User'),
-      value: log.username,
-      visible: props.cells.has('user') && !!log.username,
-      sensitive: true,
-    },
     channel: {
       label: t('Channel'),
       value: [log.channel_name, `#${log.channel}`].filter(Boolean).join(' '),
@@ -106,7 +98,7 @@ export function CommonLogMobileCard<TData>(props: {
     selected?.visible && (!selected.sensitive || context.sensitiveVisible)
       ? selected
       : undefined
-  const metadata: FieldName[] = ['user', 'channel', 'token', 'group']
+  const metadata: FieldName[] = ['channel', 'token', 'group']
   const visibleMetadata = metadata.filter((id) => fields[id].visible)
   const contentCell = props.cells.get('content')
   const channelCell = props.cells.get('channel')
@@ -221,24 +213,7 @@ export function CommonLogMobileCard<TData>(props: {
             return (
               <div key={id} className='flex min-w-0 items-center gap-2'>
                 <span className='text-muted-foreground max-w-[40%] shrink-0 text-xs [overflow-wrap:anywhere]'>
-                  {id === 'user' ? (
-                    <Avatar className='ring-border/60 size-6 shrink-0 ring-1'>
-                      <AvatarFallback
-                        className='text-[11px] font-semibold'
-                        style={
-                          context.sensitiveVisible
-                            ? getUserAvatarStyle(log.username)
-                            : undefined
-                        }
-                      >
-                        {context.sensitiveVisible
-                          ? getUserAvatarFallback(log.username)
-                          : '•'}
-                      </AvatarFallback>
-                    </Avatar>
-                  ) : (
-                    field.label
-                  )}
+                  {field.label}
                 </span>
                 {context.sensitiveVisible ? (
                   <Button
@@ -342,19 +317,6 @@ export function CommonLogMobileCard<TData>(props: {
                   channelCell.getContext()
                 )}
               </div>
-            )}
-            {selectedField === 'user' && (
-              <Button
-                variant='outline'
-                className='min-h-11'
-                onClick={() => {
-                  setSelectedField(null)
-                  context.setSelectedUserId(log.user_id)
-                  context.setUserInfoDialogOpen(true)
-                }}
-              >
-                {t('User Information')}
-              </Button>
             )}
           </div>
         )}

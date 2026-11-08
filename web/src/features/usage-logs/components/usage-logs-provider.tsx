@@ -32,10 +32,6 @@ export function resolveLogsViewAccess(role: number): LogsViewAccess {
 }
 
 interface UsageLogsContextValue {
-  selectedUserId: number | null
-  setSelectedUserId: (userId: number | null) => void
-  userInfoDialogOpen: boolean
-  setUserInfoDialogOpen: (open: boolean) => void
   sensitiveVisible: boolean
   setSensitiveVisible: (visible: boolean) => void
 }
@@ -45,17 +41,11 @@ const UsageLogsContext = createContext<UsageLogsContextValue | undefined>(
 )
 
 export function UsageLogsProvider({ children }: { children: ReactNode }) {
-  const [selectedUserId, setSelectedUserId] = useState<number | null>(null)
-  const [userInfoDialogOpen, setUserInfoDialogOpen] = useState(false)
   const [sensitiveVisible, setSensitiveVisible] = useState(true)
 
   return (
     <UsageLogsContext.Provider
       value={{
-        selectedUserId,
-        setSelectedUserId,
-        userInfoDialogOpen,
-        setUserInfoDialogOpen,
         sensitiveVisible,
         setSensitiveVisible,
       }}

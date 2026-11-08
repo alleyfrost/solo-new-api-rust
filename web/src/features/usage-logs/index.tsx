@@ -20,17 +20,11 @@ import { useTranslation } from 'react-i18next'
 
 import { SectionPageLayout } from '@/components/layout'
 
-import { UserInfoDialog } from './components/dialogs/user-info-dialog'
-import {
-  UsageLogsProvider,
-  useUsageLogsContext,
-} from './components/usage-logs-provider'
+import { UsageLogsProvider } from './components/usage-logs-provider'
 import { UsageLogsTable } from './components/usage-logs-table'
 
 function UsageLogsContent() {
   const { t } = useTranslation()
-  const { selectedUserId, userInfoDialogOpen, setUserInfoDialogOpen } =
-    useUsageLogsContext()
 
   return (
     <>
@@ -44,12 +38,6 @@ function UsageLogsContent() {
           </div>
         </SectionPageLayout.Content>
       </SectionPageLayout>
-
-      <UserInfoDialog
-        userId={selectedUserId}
-        open={userInfoDialogOpen}
-        onOpenChange={setUserInfoDialogOpen}
-      />
     </>
   )
 }

@@ -258,9 +258,8 @@ it.each([false, true])(
   }
 )
 
-it('retains the user avatar and model badge in the mobile summary', () => {
+it('retains the model badge in the mobile summary', () => {
   renderLogs()
-  expect(screen.getByText('P')).toBeVisible()
   const modelButton = screen.getByRole('button', { name: `Model: ${longName}` })
   expect(modelButton.querySelector('[data-slot="status-badge"]')).not.toBeNull()
 })
