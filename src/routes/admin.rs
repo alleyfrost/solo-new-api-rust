@@ -6,6 +6,7 @@ pub mod channel;
 pub mod channel_ops;
 pub mod data;
 pub mod log;
+pub mod migrate;
 pub mod misc;
 pub mod models;
 pub mod option;
@@ -22,5 +23,6 @@ pub fn router() -> Router<AppState> {
         .merge(models::router())
         .merge(option::router())
         .merge(misc::router())
+        .merge(migrate::router())
         .merge(user::router())
 }

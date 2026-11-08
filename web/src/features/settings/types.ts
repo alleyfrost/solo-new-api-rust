@@ -27,6 +27,16 @@ export interface OptionRow {
   value: string
 }
 
+export interface MigrationResult {
+  backup_path: string
+  stripped_rows: number
+  other_bytes_before: number
+  other_bytes_after: number
+  db_size_before: number
+  db_size_after: number
+  quota: { cutoff: number; deleted: number; inserted: number }
+}
+
 export interface LogCleanupResult {
   deleted: number
   remaining: number
@@ -42,6 +52,7 @@ export const OPTION_KEYS = {
   logConsume: 'LogConsumeEnabled',
   logExport: 'log_setting.user_export_enabled',
   logRangeDays: 'log_setting.max_range_days',
+  logRetentionDays: 'LogRetentionDays',
   bodyGateBig: 'BodyGateBigConcurrency',
   bodyGateHuge: 'BodyGateHugeConcurrency',
 } as const
@@ -54,6 +65,9 @@ export const IMAGE_MODELS_MAX_LENGTH = 4096
 export const MAX_IMAGE_MODELS = 64
 export const MIN_RANGE_DAYS = 1
 export const MAX_RANGE_DAYS = 3650
+export const MIN_RETENTION_DAYS = 0
+export const MAX_RETENTION_DAYS = 3650
+export const DEFAULT_LOG_RETENTION_DAYS = 14
 export const MIN_BODY_GATE = 1
 export const MAX_BODY_GATE = 64
 export const DEFAULT_BODY_GATE_BIG = 8

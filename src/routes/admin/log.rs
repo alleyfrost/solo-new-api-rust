@@ -440,19 +440,10 @@ async fn cleanup(
 
     // 批次上限受 SQLite 绑定变量数（现网为 32766）约束，所以删除集用子查询表达：
     // 一条语句只绑定 before 与 limit 两个变量，行数再多也不会撑爆变量表。
-    let deleted = sqlx::query(
-        "DELETE FROM logs WHERE id IN (SELECT id FROM logs WHERE created_at < ? ORDER BY id LIMIT ?)",
-    )
-    .bind(before)
-    .bind(limit)
-    .execute(&state.pool)
-    .await
-    .map_err(internal)?
-    .rows_affected() as i64;
-
-    let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM logs WHERE created_at < ?")
-        .bind(before)
-        .fetch_one(&state.pool)
+    let deleted = delete_logs_before(&state.pool, before, limit)
+        .await
+        .map_err(internal)?;
+    let remaining = count_logs_before(&state.pool, before)
         .await
         .map_err(internal)?;
     Ok(json_ok(&json!({
@@ -460,6 +451,29 @@ async fn cleanup(
         "remaining": remaining,
         "has_more": remaining > 0,
     })))
+}
+
+/// 单批删除；SQL 只绑定 before 与 limit，避免触及 SQLite 变量上限。
+pub async fn delete_logs_before(
+    pool: &SqlitePool,
+    before: i64,
+    limit: i64,
+) -> Result<i64, sqlx::Error> {
+    Ok(sqlx::query(
+        "DELETE FROM logs WHERE id IN (SELECT id FROM logs WHERE created_at < ? ORDER BY id LIMIT ?)",
+    )
+    .bind(before)
+    .bind(limit)
+    .execute(pool)
+    .await?
+    .rows_affected() as i64)
+}
+
+pub async fn count_logs_before(pool: &SqlitePool, before: i64) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar("SELECT COUNT(*) FROM logs WHERE created_at < ?")
+        .bind(before)
+        .fetch_one(pool)
+        .await
 }
 
 fn now() -> i64 {

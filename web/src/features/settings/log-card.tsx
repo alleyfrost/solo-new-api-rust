@@ -40,7 +40,14 @@ import { formatTimestampForInput, parseTimestampFromInput } from '@/lib/format'
 import { handleServerError } from '@/lib/handle-server-error'
 
 import { cleanupLogsBefore } from './api'
-import { MAX_RANGE_DAYS, MIN_RANGE_DAYS, OPTION_KEYS } from './types'
+import {
+  DEFAULT_LOG_RETENTION_DAYS,
+  MAX_RANGE_DAYS,
+  MAX_RETENTION_DAYS,
+  MIN_RANGE_DAYS,
+  MIN_RETENTION_DAYS,
+  OPTION_KEYS,
+} from './types'
 import { useOptions, useSaveOptions } from './use-settings'
 
 const HOURS_IN_DAY = 24
@@ -50,6 +57,7 @@ type LogValues = {
   consume: boolean
   export: boolean
   rangeDays: string
+  retentionDays: string
 }
 
 function daysAgoInput(days: number): string {
@@ -67,6 +75,7 @@ export function LogCard() {
     consume: true,
     export: true,
     rangeDays: '',
+    retentionDays: String(DEFAULT_LOG_RETENTION_DAYS),
   })
   const [cutoff, setCutoff] = useState(() => daysAgoInput(7))
   const [cleanupDone, setCleanupDone] = useState<number | null>(null)
@@ -77,10 +86,14 @@ export function LogCard() {
       consume: loaded[OPTION_KEYS.logConsume] !== 'false',
       export: loaded[OPTION_KEYS.logExport] !== 'false',
       rangeDays: loaded[OPTION_KEYS.logRangeDays] ?? '',
+      retentionDays:
+        loaded[OPTION_KEYS.logRetentionDays] ??
+        String(DEFAULT_LOG_RETENTION_DAYS),
     })
   }, [loaded])
 
   const rangeDays = Number(values.rangeDays)
+  const retentionDays = Number(values.retentionDays)
   const changes: Array<[string, string | boolean | number]> = []
   if (values.consume !== (loaded[OPTION_KEYS.logConsume] !== 'false')) {
     changes.push([OPTION_KEYS.logConsume, values.consume])
@@ -90,6 +103,12 @@ export function LogCard() {
   }
   if (rangeDays > 0 && String(rangeDays) !== loaded[OPTION_KEYS.logRangeDays]) {
     changes.push([OPTION_KEYS.logRangeDays, rangeDays])
+  }
+  if (
+    String(retentionDays) !==
+    (loaded[OPTION_KEYS.logRetentionDays] ?? String(DEFAULT_LOG_RETENTION_DAYS))
+  ) {
+    changes.push([OPTION_KEYS.logRetentionDays, retentionDays])
   }
 
   const handleSave = async () => {
@@ -102,6 +121,19 @@ export function LogCard() {
         t('Export range must be between {{min}} and {{max}} days', {
           min: MIN_RANGE_DAYS,
           max: MAX_RANGE_DAYS,
+        })
+      )
+      return
+    }
+    if (
+      !Number.isInteger(retentionDays) ||
+      retentionDays < MIN_RETENTION_DAYS ||
+      retentionDays > MAX_RETENTION_DAYS
+    ) {
+      toast.error(
+        t('Retention must be between {{min}} and {{max}} days', {
+          min: MIN_RETENTION_DAYS,
+          max: MAX_RETENTION_DAYS,
         })
       )
       return
@@ -227,6 +259,33 @@ export function LogCard() {
             disabled={save.isPending}
             onChange={(event) =>
               setValues((prev) => ({ ...prev, rangeDays: event.target.value }))
+            }
+          />
+        </label>
+
+        <label className='flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between'>
+          <span className='space-y-0.5'>
+            <span className='block text-sm font-medium'>
+              {t('Log retention (days)')}
+            </span>
+            <span className='text-muted-foreground block text-xs'>
+              {t(
+                'Logs older than this are removed automatically. 0 disables the cleanup.'
+              )}
+            </span>
+          </span>
+          <Input
+            className='w-32'
+            type='number'
+            min={MIN_RETENTION_DAYS}
+            max={MAX_RETENTION_DAYS}
+            value={values.retentionDays}
+            disabled={save.isPending}
+            onChange={(event) =>
+              setValues((prev) => ({
+                ...prev,
+                retentionDays: event.target.value,
+              }))
             }
           />
         </label>

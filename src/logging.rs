@@ -96,6 +96,96 @@ async fn record_perf(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, e: &LogEntry)
     }
 }
 
+struct QuotaDelta {
+    user_id: i64,
+    username: String,
+    model_name: String,
+    bucket: i64,
+    group: String,
+    token_id: i64,
+    channel_id: i64,
+    token_used: i64,
+    count: i64,
+    cache_read: i64,
+    cache_write: i64,
+}
+
+type QuotaKey = (i64, String, String, i64, String, i64, i64);
+
+fn cache_tokens(other: &str) -> (i64, i64) {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(other) else {
+        return (0, 0);
+    };
+    let read = value
+        .get("cache_tokens")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+    let write = value
+        .get("cache_creation_tokens")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+    (read.max(0), write.max(0))
+}
+
+async fn record_quota(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, d: &QuotaDelta) {
+    let existing: Result<Option<i64>, _> = sqlx::query_scalar(
+        "SELECT id FROM quota_data WHERE user_id=? AND username=? AND model_name=? \
+         AND created_at=? AND use_group=? AND token_id=? AND channel_id=? AND node_name='' \
+         LIMIT 1",
+    )
+    .bind(d.user_id)
+    .bind(&d.username)
+    .bind(&d.model_name)
+    .bind(d.bucket)
+    .bind(&d.group)
+    .bind(d.token_id)
+    .bind(d.channel_id)
+    .fetch_optional(&mut **tx)
+    .await;
+    let outcome = match existing {
+        Ok(Some(id)) => {
+            sqlx::query(
+                "UPDATE quota_data SET token_used=token_used+?, count=count+?, quota=quota+0, \
+                 cache_read_tokens=cache_read_tokens+?, cache_creation_tokens=cache_creation_tokens+? \
+                 WHERE id=?",
+            )
+            .bind(d.token_used)
+            .bind(d.count)
+            .bind(d.cache_read)
+            .bind(d.cache_write)
+            .bind(id)
+            .execute(&mut **tx)
+            .await
+            .map(|_| ())
+        }
+        Ok(None) => {
+            sqlx::query(
+                "INSERT INTO quota_data (user_id, username, model_name, created_at, use_group, \
+                 token_id, channel_id, node_name, token_used, count, quota, cache_read_tokens, \
+                 cache_creation_tokens) VALUES (?,?,?,?,?,?,?, '', ?,?,0,?,?)",
+            )
+            .bind(d.user_id)
+            .bind(&d.username)
+            .bind(&d.model_name)
+            .bind(d.bucket)
+            .bind(&d.group)
+            .bind(d.token_id)
+            .bind(d.channel_id)
+            .bind(d.token_used)
+            .bind(d.count)
+            .bind(d.cache_read)
+            .bind(d.cache_write)
+            .execute(&mut **tx)
+            .await
+            .map(|_| ())
+        }
+        Err(e) => Err(e),
+    };
+    if let Err(err) = outcome {
+        tracing::debug!("quota data upsert failed: {err}");
+    }
+}
+
 async fn flush(pool: &SqlitePool, batch: &mut Vec<LogEntry>) {
     if batch.is_empty() {
         return;
@@ -109,12 +199,43 @@ async fn flush(pool: &SqlitePool, batch: &mut Vec<LogEntry>) {
         }
     };
     let mut touched: HashMap<i64, i64> = HashMap::new();
+    let mut quota: HashMap<QuotaKey, QuotaDelta> = HashMap::new();
     for e in batch.drain(..) {
         touched
             .entry(e.token_id)
             .and_modify(|t| *t = (*t).max(e.created_at))
             .or_insert(e.created_at);
         record_perf(&mut tx, &e).await;
+        if e.log_type == LOG_TYPE_CONSUME {
+            let bucket = e.created_at / 3600 * 3600;
+            let key = (
+                e.user_id,
+                e.username.clone(),
+                e.model_name.clone(),
+                bucket,
+                e.group.clone(),
+                e.token_id,
+                e.channel_id,
+            );
+            let (cache_read, cache_write) = cache_tokens(&e.other);
+            let delta = quota.entry(key).or_insert_with(|| QuotaDelta {
+                user_id: e.user_id,
+                username: e.username.clone(),
+                model_name: e.model_name.clone(),
+                bucket,
+                group: e.group.clone(),
+                token_id: e.token_id,
+                channel_id: e.channel_id,
+                token_used: 0,
+                count: 0,
+                cache_read: 0,
+                cache_write: 0,
+            });
+            delta.token_used += e.prompt_tokens.max(0) + e.completion_tokens.max(0);
+            delta.count += 1;
+            delta.cache_read += cache_read;
+            delta.cache_write += cache_write;
+        }
         if let Err(err) = sqlx::query(
             "INSERT INTO logs (user_id,created_at,type,content,username,token_name,model_name,quota,prompt_tokens,completion_tokens,use_time,is_stream,channel_id,channel_name,token_id,`group`,ip,request_id,upstream_request_id,other) \
              VALUES (?,?,?,?,?,?,?,0,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -143,6 +264,9 @@ async fn flush(pool: &SqlitePool, batch: &mut Vec<LogEntry>) {
         {
             tracing::error!("insert log failed: {err}");
         }
+    }
+    for delta in quota.values() {
+        record_quota(&mut tx, delta).await;
     }
     for (token_id, ts) in touched {
         if let Err(e) = sqlx::query("UPDATE tokens SET accessed_time = ? WHERE id = ?")

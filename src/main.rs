@@ -39,12 +39,21 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("{e}");
         std::process::exit(2);
     })?;
+    match solo_new_api_rust::quota_data::backfill(&pool).await {
+        Ok(stats) if stats.inserted > 0 => eprintln!(
+            "quota_data backfill: cutoff={} deleted={} inserted={}",
+            stats.cutoff, stats.deleted, stats.inserted
+        ),
+        Ok(_) => {}
+        Err(e) => eprintln!("quota_data backfill failed: {e}"),
+    }
     let caches = state::Caches::load(&pool).await?;
     let jwt_secret = auth::session::load_or_create_secret(&config.jwt_secret_path)?;
     let (log_tx, log_rx) = logging::channel(20_000);
     let writer = logging::spawn_writer(pool.clone(), log_rx);
     let state = state::AppState::new(config.clone(), pool, caches, jwt_secret, Some(log_tx));
     solo_new_api_rust::mem::spawn_periodic_trim();
+    solo_new_api_rust::retention::spawn(state.clone());
 
     let login_route = axum::Router::new()
         .route("/api/user/login", axum::routing::post(routes::user::login))

@@ -11,20 +11,22 @@ pub const KEY_SERVER_ADDRESS: &str = "ServerAddress";
 pub const KEY_LOG_CONSUME_ENABLED: &str = "LogConsumeEnabled";
 pub const KEY_LOG_EXPORT_ENABLED: &str = "log_setting.user_export_enabled";
 pub const KEY_LOG_MAX_RANGE_DAYS: &str = "log_setting.max_range_days";
+pub const KEY_LOG_RETENTION_DAYS: &str = "LogRetentionDays";
 /// 只会走 `/v1/images/generations` 的模型；列在这里的模型允许用 chat 请求触发生图。
 pub const KEY_IMAGE_MODELS: &str = "ImageModels";
 /// 大请求体（2–8 MiB / >8 MiB）的并发闸门，限制峰值内存。
 pub const KEY_BODY_GATE_BIG: &str = "BodyGateBigConcurrency";
 pub const KEY_BODY_GATE_HUGE: &str = "BodyGateHugeConcurrency";
 
-pub const KEYS: [&str; 10] = [
+pub const KEYS: [&str; 11] = [
     KEY_BODY_GATE_BIG,
     KEY_BODY_GATE_HUGE,
     KEY_IMAGE_MODELS,
-    KEY_LOGO,
     KEY_LOG_CONSUME_ENABLED,
     KEY_LOG_EXPORT_ENABLED,
     KEY_LOG_MAX_RANGE_DAYS,
+    KEY_LOG_RETENTION_DAYS,
+    KEY_LOGO,
     KEY_NOTICE,
     KEY_SERVER_ADDRESS,
     KEY_SYSTEM_NAME,
@@ -36,6 +38,9 @@ const MAX_NOTICE_CHARS: usize = 2000;
 const MAX_ADDRESS_CHARS: usize = 256;
 pub const MIN_RANGE_DAYS: i64 = 1;
 pub const MAX_RANGE_DAYS: i64 = 3650;
+pub const MIN_RETENTION_DAYS: i64 = 0;
+pub const MAX_RETENTION_DAYS: i64 = 3650;
+pub const DEFAULT_LOG_RETENTION_DAYS: i64 = 14;
 pub const MAX_IMAGE_MODELS: usize = 64;
 pub const MAX_MODEL_NAME_CHARS: usize = 128;
 const MAX_IMAGE_MODELS_CHARS: usize = 4096;
@@ -53,6 +58,7 @@ pub struct Settings {
     pub log_consume_enabled: bool,
     pub log_export_enabled: bool,
     pub log_max_range_days: i64,
+    pub log_retention_days: i64,
     pub image_models: Vec<String>,
     pub body_gate_big: usize,
     pub body_gate_huge: usize,
@@ -68,6 +74,7 @@ impl Default for Settings {
             log_consume_enabled: true,
             log_export_enabled: true,
             log_max_range_days: crate::routes::admin::log::MAX_EXPORT_DAYS,
+            log_retention_days: DEFAULT_LOG_RETENTION_DAYS,
             image_models: Vec::new(),
             body_gate_big: DEFAULT_BODY_GATE_BIG,
             body_gate_huge: DEFAULT_BODY_GATE_HUGE,
@@ -108,20 +115,19 @@ impl Settings {
                 .and_then(|v| v.parse::<i64>().ok())
                 .filter(|v| (MIN_RANGE_DAYS..=MAX_RANGE_DAYS).contains(v))
                 .unwrap_or(defaults.log_max_range_days),
+            log_retention_days: options
+                .get(KEY_LOG_RETENTION_DAYS)
+                .and_then(|v| v.parse::<i64>().ok())
+                .filter(|v| (MIN_RETENTION_DAYS..=MAX_RETENTION_DAYS).contains(v))
+                .unwrap_or(defaults.log_retention_days),
             image_models: split_models(
                 options
                     .get(KEY_IMAGE_MODELS)
                     .map(String::as_str)
                     .unwrap_or(""),
             ),
-            body_gate_big: gate_limit(
-                options.get(KEY_BODY_GATE_BIG),
-                defaults.body_gate_big,
-            ),
-            body_gate_huge: gate_limit(
-                options.get(KEY_BODY_GATE_HUGE),
-                defaults.body_gate_huge,
-            ),
+            body_gate_big: gate_limit(options.get(KEY_BODY_GATE_BIG), defaults.body_gate_big),
+            body_gate_huge: gate_limit(options.get(KEY_BODY_GATE_HUGE), defaults.body_gate_huge),
         }
     }
 
@@ -143,6 +149,7 @@ impl Settings {
             ),
             (KEY_LOG_EXPORT_ENABLED, self.log_export_enabled.to_string()),
             (KEY_LOG_MAX_RANGE_DAYS, self.log_max_range_days.to_string()),
+            (KEY_LOG_RETENTION_DAYS, self.log_retention_days.to_string()),
             (KEY_NOTICE, self.notice.clone()),
             (KEY_SERVER_ADDRESS, self.server_address.clone()),
             (KEY_SYSTEM_NAME, self.system_name.clone()),
@@ -216,6 +223,17 @@ pub fn normalize(key: &str, raw: &Value) -> Result<String, String> {
                 ));
             }
             Ok(limit.to_string())
+        }
+        KEY_LOG_RETENTION_DAYS => {
+            let days = text.trim().parse::<i64>().map_err(|_| {
+                format!("Expected an integer between {MIN_RETENTION_DAYS} and {MAX_RETENTION_DAYS}")
+            })?;
+            if !(MIN_RETENTION_DAYS..=MAX_RETENTION_DAYS).contains(&days) {
+                return Err(format!(
+                    "Expected an integer between {MIN_RETENTION_DAYS} and {MAX_RETENTION_DAYS}"
+                ));
+            }
+            Ok(days.to_string())
         }
         KEY_IMAGE_MODELS => {
             let models = split_models(&text);

@@ -1,6 +1,6 @@
+use axum::Router;
 use axum::body::Body;
 use axum::http::Request;
-use axum::Router;
 use http_body_util::BodyExt;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
@@ -14,7 +14,11 @@ async fn setup() -> (Router, SqlitePool, i64) {
     sqlx::query("CREATE TABLE tokens (id INTEGER PRIMARY KEY, user_id INTEGER, `key` TEXT, status INTEGER, name TEXT, created_time INTEGER, accessed_time INTEGER, expired_time INTEGER, remain_quota INTEGER, unlimited_quota INTEGER, model_limits_enabled INTEGER, model_limits TEXT, allow_ips TEXT, `group` TEXT, auto_groups TEXT, cross_group_retry INTEGER, used_quota INTEGER, allow_user_quota_query INTEGER, deleted_at TEXT)").execute(&pool).await.unwrap();
     sqlx::query("CREATE TABLE channels (id INTEGER PRIMARY KEY, type INTEGER, `key` TEXT, status INTEGER, name TEXT, models TEXT, `group` TEXT, base_url TEXT, priority INTEGER, weight INTEGER, channel_info TEXT, model_mapping TEXT, header_override TEXT, created_time INTEGER, test_time INTEGER, response_time INTEGER, open_ai_organization TEXT, test_model TEXT, other TEXT, balance REAL, balance_updated_time INTEGER, used_quota INTEGER, status_code_mapping TEXT, auto_ban INTEGER, other_info TEXT, tag TEXT, setting TEXT, param_override TEXT, remark TEXT, settings TEXT)").execute(&pool).await.unwrap();
     sqlx::query("CREATE TABLE abilities (`group` TEXT, model TEXT, channel_id INTEGER, enabled INTEGER, priority INTEGER, weight INTEGER)").execute(&pool).await.unwrap();
-    sqlx::query("CREATE TABLE options (`key` TEXT PRIMARY KEY, value TEXT)").execute(&pool).await.unwrap();
+    sqlx::query("CREATE TABLE options (`key` TEXT PRIMARY KEY, value TEXT)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("CREATE TABLE quota_data (id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,username TEXT DEFAULT '',model_name TEXT DEFAULT '',created_at INTEGER,use_group TEXT DEFAULT '',token_id INTEGER DEFAULT 0,channel_id INTEGER DEFAULT 0,node_name TEXT DEFAULT '',token_used INTEGER DEFAULT 0,count INTEGER DEFAULT 0,quota INTEGER DEFAULT 0,cache_read_tokens INTEGER DEFAULT 0,cache_creation_tokens INTEGER DEFAULT 0)").execute(&pool).await.unwrap();
     sqlx::query("CREATE TABLE perf_metrics (id INTEGER PRIMARY KEY AUTOINCREMENT,model_name TEXT,`group` TEXT,bucket_ts INTEGER,request_count INTEGER DEFAULT 0,success_count INTEGER DEFAULT 0,total_latency_ms INTEGER DEFAULT 0,ttft_sum_ms INTEGER DEFAULT 0,ttft_count INTEGER DEFAULT 0,output_tokens INTEGER DEFAULT 0,generation_ms INTEGER DEFAULT 0)").execute(&pool).await.unwrap();
 
     let now = std::time::SystemTime::now()
@@ -33,15 +37,27 @@ async fn setup() -> (Router, SqlitePool, i64) {
             .unwrap();
     }
 
+    sqlx::query("INSERT INTO tokens (id,user_id,`key`,status,name) VALUES (2,1,'k',1,'t')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO channels (id,type,`key`,status,name) VALUES (3,1,'k',1,'c')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO quota_data (user_id,username,model_name,created_at,use_group,token_id,channel_id,node_name,token_used,count,quota,cache_read_tokens,cache_creation_tokens) VALUES (1,'root','m1',?,'default',2,3,'',45,2,0,7,3)")
+        .bind(now - 10)
+        .execute(&pool)
+        .await
+        .unwrap();
     sqlx::query("UPDATE logs SET other='{\"cache_tokens\":7,\"cache_creation_tokens\":3}' WHERE model_name='m1' AND prompt_tokens=10")
         .execute(&pool)
         .await
         .unwrap();
     let bucket = now / 3600 * 3600;
-    for (model, requests, successes, latency, output, generation) in [
-        ("m1", 3, 2, 3000, 30, 3000),
-        ("m2", 1, 0, 1000, 0, 1000),
-    ] {
+    for (model, requests, successes, latency, output, generation) in
+        [("m1", 3, 2, 3000, 30, 3000), ("m2", 1, 0, 1000, 0, 1000)]
+    {
         sqlx::query("INSERT INTO perf_metrics (model_name,`group`,bucket_ts,request_count,success_count,total_latency_ms,ttft_sum_ms,ttft_count,output_tokens,generation_ms) VALUES (?, 'default', ?, ?, ?, ?, 0, 0, ?, ?)")
             .bind(model)
             .bind(bucket)
@@ -80,7 +96,10 @@ async fn get(app: &Router, uri: &str) -> (u16, serde_json::Value) {
         .unwrap();
     let status = res.status().as_u16();
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
-    (status, serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null))
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
+    )
 }
 
 #[tokio::test]
@@ -104,7 +123,15 @@ async fn log_list_filters_and_stats() {
     assert_eq!(stat["data"]["rpm"], 2);
     assert_eq!(stat["data"]["tpm"], 45);
 
-    let (_status, data) = get(&app, &format!("/api/data?start_timestamp={}&end_timestamp={}", now - 3600, now + 1)).await;
+    let (_status, data) = get(
+        &app,
+        &format!(
+            "/api/data?start_timestamp={}&end_timestamp={}",
+            now - 3600,
+            now + 1
+        ),
+    )
+    .await;
     assert_eq!(data["data"].as_array().unwrap().len(), 1);
     let m1 = data["data"]
         .as_array()
@@ -117,16 +144,48 @@ async fn log_list_filters_and_stats() {
     assert_eq!(m1["cache_read_tokens"], 7);
     assert_eq!(m1["cache_creation_tokens"], 3);
 
-    let (_, by_token) = get(&app, &format!("/api/data?start_timestamp={}&end_timestamp={}&token_id=2", now - 3600, now + 1)).await;
+    let (_, by_token) = get(
+        &app,
+        &format!(
+            "/api/data?start_timestamp={}&end_timestamp={}&token_id=2",
+            now - 3600,
+            now + 1
+        ),
+    )
+    .await;
     assert_eq!(by_token["data"].as_array().unwrap().len(), 1);
     assert_eq!(by_token["data"][0]["token_used"], 45);
-    let (_, no_token) = get(&app, &format!("/api/data?start_timestamp={}&end_timestamp={}&token_id=999", now - 3600, now + 1)).await;
+    let (_, no_token) = get(
+        &app,
+        &format!(
+            "/api/data?start_timestamp={}&end_timestamp={}&token_id=999",
+            now - 3600,
+            now + 1
+        ),
+    )
+    .await;
     assert_eq!(no_token["data"].as_array().unwrap().len(), 0);
 
-    let (_, users) = get(&app, &format!("/api/data/users?start_timestamp={}&end_timestamp={}", now - 3600, now + 1)).await;
+    let (_, users) = get(
+        &app,
+        &format!(
+            "/api/data/users?start_timestamp={}&end_timestamp={}",
+            now - 3600,
+            now + 1
+        ),
+    )
+    .await;
     assert_eq!(users["data"][0]["username"], "root");
 
-    let (_, flow) = get(&app, &format!("/api/data/flow?start_timestamp={}&end_timestamp={}", now - 3600, now + 1)).await;
+    let (_, flow) = get(
+        &app,
+        &format!(
+            "/api/data/flow?start_timestamp={}&end_timestamp={}",
+            now - 3600,
+            now + 1
+        ),
+    )
+    .await;
     assert_eq!(flow["data"][0]["channel_name"], "c");
     assert_eq!(flow["data"][0]["token_name"], "t");
 

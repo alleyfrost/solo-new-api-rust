@@ -55,7 +55,7 @@ git -C /path/to/new-api diff --stat OLD_COMMIT..NEW_COMMIT -- relay/ controller/
 
 - 侧边栏：「聊天」组置顶游乐场；「模型调用分析」改名「数据看板」；概览页删除公告/FAQ/API 信息/运行时间四张恒空卡。
 - 品牌：蓝紫新月 + 星芒的 `favicon.ico`/`logo.png` 与顶栏徽标。
-- 系统设置：只保留站点信息、日志维护、生图模型三项，8 个白名单键。
+- 系统设置：只保留站点信息、日志维护、转发并发、生图模型与 new-api 迁移，11 个白名单键。
 - Playground：统一聊天界面；生图结果内联渲染，本地历史用 `[[image-omitted]]` 占位，不保存 base64。
 - 管理端：金额/定价列改为用量口径；渠道的 Ollama/上游同步/多 Key 管理面板等已裁剪入口不要恢复。
 - 认证：注册、找回密码、OAuth、2FA/Passkey 入口保持删除；令牌新建支持自定义密钥、编辑不改密钥。

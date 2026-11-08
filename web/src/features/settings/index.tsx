@@ -22,6 +22,7 @@ import { SectionPageLayout } from '@/components/layout'
 
 import { ConcurrencyCard } from './concurrency-card'
 import { LogCard } from './log-card'
+import { MigrationCard } from './migration-card'
 import { SiteCard } from './site-card'
 
 export function Settings() {
@@ -35,6 +36,7 @@ export function Settings() {
           <SiteCard />
           <ConcurrencyCard />
           <LogCard />
+          <MigrationCard />
           <p className='text-muted-foreground text-xs'>
             {t(
               'Routing, retries and channel health follow the built-in policy and are configured per channel.'

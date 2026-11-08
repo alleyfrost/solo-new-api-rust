@@ -18,7 +18,12 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
 
-import type { ApiResponse, LogCleanupResult, OptionRow } from './types'
+import type {
+  ApiResponse,
+  LogCleanupResult,
+  MigrationResult,
+  OptionRow,
+} from './types'
 
 export async function getOptions(): Promise<ApiResponse<OptionRow[]>> {
   const res = await api.get('/api/option/')
@@ -30,6 +35,13 @@ export async function updateOption(
   value: string | number | boolean
 ): Promise<ApiResponse> {
   const res = await api.put('/api/option/', { key, value })
+  return res.data
+}
+
+export async function migrateFromNewApi(
+  backup: boolean
+): Promise<ApiResponse<MigrationResult>> {
+  const res = await api.post('/api/migrate/new-api', { backup })
   return res.data
 }
 
