@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { sanitizeImageSrc, type ImageNode } from 'stream-markdown-parser'
 
@@ -24,10 +24,23 @@ type ResponseImageProps = {
   node: ImageNode
 }
 
+// Upstream validation walks and normalizes the whole URL, which is O(size).
+// Generated images arrive inline as multi-megabyte base64 data URLs, so a
+// known-safe inline image short-circuits that scan.
+const SAFE_INLINE_IMAGE =
+  /^data:image\/(?:png|gif|jpe?g|webp|avif|bmp);base64,/i
+
+function resolveImageSrc(raw: string): string {
+  if (SAFE_INLINE_IMAGE.test(raw)) {
+    return raw
+  }
+  return sanitizeImageSrc(raw)
+}
+
 export function ResponseImage(props: ResponseImageProps) {
   const { t } = useTranslation()
   const [hasError, setHasError] = useState(false)
-  const src = sanitizeImageSrc(props.node.src)
+  const src = useMemo(() => resolveImageSrc(props.node.src), [props.node.src])
 
   if (!src || hasError) {
     return (
