@@ -1,9 +1,9 @@
 {
   "translation": {
-    "2–8 MiB concurrency": "2–8 MiB の同時実行数",
     "360": "360",
     "1000": "1000",
     "10000": "10000",
+    "2–8 MiB concurrency": "2–8 MiB の同時実行数",
     "> 8 MiB concurrency": "8 MiB 超の同時実行数",
     "A custom key can only be used for one key at a time": "カスタムキーは一度に1つだけ作成できます",
     "All keys": "すべてのキー",
@@ -7482,6 +7482,20 @@
     "Zhipu": "Zhipu",
     "Zhipu GLM": "Zhipu GLM",
     "Zhipu V4": "Zhipu V 4",
-    "Zoom": "ズーム"
+    "Zoom": "ズーム",
+    "Collapse sidebar": "サイドバーを折りたたむ",
+    "Conversation limit reached": "会話の上限に達しました",
+    "Conversations": "会話",
+    "Delete an old conversation first.": "先に古い会話を削除してください。",
+    "Delete conversation": "会話を削除",
+    "Earlier": "それ以前",
+    "Expand sidebar": "サイドバーを展開",
+    "New chat": "新しい会話",
+    "New conversation": "新しい会話を開始",
+    "No conversations": "会話がありません",
+    "No matching conversations": "一致する会話がありません",
+    "Search conversations": "会話を検索",
+    "This conversation will be permanently deleted.": "この会話は完全に削除されます。",
+    "Yesterday": "昨日"
   }
 }

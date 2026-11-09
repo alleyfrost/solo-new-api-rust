@@ -76,6 +76,7 @@ export interface ChatCompletionRequest {
   frequency_penalty?: number
   presence_penalty?: number
   seed?: number
+  response_format?: 'url' | 'b64_json'
 }
 
 export interface ChatCompletionChunk {

@@ -16,8 +16,16 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
+
+import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
+import { useMediaQuery } from '@/hooks'
+
 import { PlaygroundChat } from './components/chat/playground-chat'
 import { PlaygroundInput } from './components/input/playground-input'
+import { PlaygroundSessionSidebar } from './components/session/playground-session-sidebar'
 import {
   useChatHandler,
   usePlaygroundConversation,
@@ -26,6 +34,11 @@ import {
 } from './hooks'
 
 export function Playground() {
+  const { t } = useTranslation()
+  const isMobile = useMediaQuery('(max-width: 767px)')
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [drawerOpen, setDrawerOpen] = useState(false)
+
   const {
     config,
     parameterEnabled,
@@ -33,11 +46,19 @@ export function Playground() {
     isLoadingMessages,
     models,
     groups,
+    sessions,
+    activeId,
+    draft,
     updateMessages,
     setModels,
     setGroups,
     updateConfig,
     updateParameterEnabled,
+    updateDraft,
+    selectSession,
+    createSession,
+    renameSession,
+    deleteSession,
     clearMessages,
   } = usePlaygroundState()
 
@@ -66,6 +87,25 @@ export function Playground() {
     clearMessages()
   }
 
+  const handleCreateSession = () => {
+    if (!createSession()) {
+      toast.error(t('Conversation limit reached'), {
+        description: t('Delete an old conversation first.'),
+      })
+      return
+    }
+    if (isMobile) setDrawerOpen(false)
+  }
+
+  const handleSelectSession = (sessionId: string) => {
+    selectSession(sessionId)
+    if (isMobile) setDrawerOpen(false)
+  }
+
+  const handleDeleteSession = (sessionId: string) => {
+    void deleteSession(sessionId)
+  }
+
   const { isLoadingModels } = usePlaygroundOptions({
     currentGroup: config.group,
     currentModel: config.model,
@@ -74,46 +114,92 @@ export function Playground() {
     updateConfig,
   })
 
-  return (
-    <div className='relative flex size-full min-h-0 flex-col overflow-hidden'>
-      {/* Full-width scroll container: scrolling works even over side whitespace */}
-      <div className='flex min-h-0 flex-1 flex-col overflow-hidden'>
-        <PlaygroundChat
-          messages={messages}
-          isLoadingMessages={isLoadingMessages}
-          onRegenerateMessage={handleRegenerateMessage}
-          onEditMessage={handleEditMessage}
-          onDeleteMessage={handleDeleteMessage}
-          onSelectPrompt={handleSendMessage}
-          isGenerating={isGenerating}
-          editingKey={editingMessageKey}
-          onCancelEdit={handleEditOpenChange}
-          onSaveEdit={(newContent) => applyEdit(newContent, false)}
-          onSaveEditAndSubmit={(newContent) => applyEdit(newContent, true)}
-        />
-      </div>
+  const sidebar = (
+    collapsed: boolean,
+    options: { embedded?: boolean; onToggle?: () => void } = {}
+  ) => (
+    <PlaygroundSessionSidebar
+      activeId={activeId}
+      collapsed={collapsed}
+      disabled={isGenerating}
+      embedded={options.embedded}
+      onCreate={handleCreateSession}
+      onDelete={handleDeleteSession}
+      onRename={renameSession}
+      onSelect={handleSelectSession}
+      onToggle={
+        options.onToggle ?? (() => setSidebarCollapsed((value) => !value))
+      }
+      sessions={sessions}
+    />
+  )
 
-      {/* Input area: center content and constrain to the same container width */}
-      <div className='mx-auto w-full max-w-4xl'>
-        <PlaygroundInput
-          config={config}
-          disabled={isGenerating}
-          groups={groups}
-          groupValue={config.group}
-          isGenerating={isGenerating}
-          isModelLoading={isLoadingModels}
-          modelValue={config.model}
-          models={models}
-          onGroupChange={(value) => updateConfig('group', value)}
-          onConfigChange={updateConfig}
-          onClearMessages={handleClearMessages}
-          onModelChange={(value) => updateConfig('model', value)}
-          onParameterEnabledChange={updateParameterEnabled}
-          onStop={stopGeneration}
-          onSubmit={handleSendMessage}
-          parameterEnabled={parameterEnabled}
-          hasMessages={messages.length > 0}
-        />
+  return (
+    <div className='relative flex size-full min-h-0 overflow-hidden'>
+      {!isMobile && !sidebarCollapsed && sidebar(false)}
+
+      <div className='relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden'>
+        {!isMobile && sidebarCollapsed && sidebar(true)}
+
+        {isMobile && (
+          <>
+            <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
+              <SheetContent className='w-72 p-0' side='left'>
+                <SheetTitle className='sr-only'>
+                  {t('Conversations')}
+                </SheetTitle>
+                {sidebar(false, {
+                  embedded: true,
+                  onToggle: () => setDrawerOpen(false),
+                })}
+              </SheetContent>
+            </Sheet>
+            {!drawerOpen &&
+              sidebar(true, { onToggle: () => setDrawerOpen(true) })}
+          </>
+        )}
+
+        {/* Full-width scroll container: scrolling works even over side whitespace */}
+        <div className='flex min-h-0 flex-1 flex-col overflow-hidden'>
+          <PlaygroundChat
+            messages={messages}
+            isLoadingMessages={isLoadingMessages}
+            onRegenerateMessage={handleRegenerateMessage}
+            onEditMessage={handleEditMessage}
+            onDeleteMessage={handleDeleteMessage}
+            onSelectPrompt={handleSendMessage}
+            isGenerating={isGenerating}
+            editingKey={editingMessageKey}
+            onCancelEdit={handleEditOpenChange}
+            onSaveEdit={(newContent) => applyEdit(newContent, false)}
+            onSaveEditAndSubmit={(newContent) => applyEdit(newContent, true)}
+          />
+        </div>
+
+        {/* Input area: center content and constrain to the same container width */}
+        <div className='mx-auto w-full max-w-4xl'>
+          <PlaygroundInput
+            config={config}
+            disabled={isGenerating}
+            draft={draft}
+            groups={groups}
+            groupValue={config.group}
+            isGenerating={isGenerating}
+            isModelLoading={isLoadingModels}
+            modelValue={config.model}
+            models={models}
+            onConfigChange={updateConfig}
+            onClearMessages={handleClearMessages}
+            onDraftChange={updateDraft}
+            onGroupChange={(value) => updateConfig('group', value)}
+            onModelChange={(value) => updateConfig('model', value)}
+            onParameterEnabledChange={updateParameterEnabled}
+            onStop={stopGeneration}
+            onSubmit={handleSendMessage}
+            parameterEnabled={parameterEnabled}
+            hasMessages={messages.length > 0}
+          />
+        </div>
       </div>
     </div>
   )

@@ -16,10 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useQuery } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { handleServerError } from '@/lib/handle-server-error'
+import { statusQueryOptions } from '@/lib/status-query'
 
 import { sendChatCompletion } from '../api'
 import { ERROR_MESSAGES } from '../constants'
@@ -73,6 +75,11 @@ export function useChatHandler({
   onMessageUpdate,
 }: UseChatHandlerOptions) {
   const { t } = useTranslation()
+  const { data: status } = useQuery(statusQueryOptions)
+  const imageModels = Array.isArray(status?.image_models)
+    ? (status.image_models as string[])
+    : []
+  const imageModel = imageModels.includes(config.model)
   const { sendStreamRequest, stopStream, isStreaming } = useStreamRequest()
   const [isRequesting, setIsRequesting] = useState(false)
   const abortControllerRef = useRef<AbortController | null>(null)
@@ -253,7 +260,8 @@ export function useChatHandler({
       const payload = buildChatCompletionPayload(
         messages,
         config,
-        parameterEnabled
+        parameterEnabled,
+        { imageModel }
       )
       void sendStreamRequest(
         payload,
@@ -265,6 +273,7 @@ export function useChatHandler({
     [
       config,
       parameterEnabled,
+      imageModel,
       sendStreamRequest,
       discardPendingStreamUpdates,
       handleStreamUpdate,
@@ -279,7 +288,8 @@ export function useChatHandler({
       const payload = buildChatCompletionPayload(
         messages,
         config,
-        parameterEnabled
+        parameterEnabled,
+        { imageModel }
       )
       const generation = requestGenerationRef.current + 1
       const abortController = new AbortController()
@@ -339,6 +349,7 @@ export function useChatHandler({
     [
       config,
       parameterEnabled,
+      imageModel,
       stopStream,
       discardPendingStreamUpdates,
       onMessageUpdate,

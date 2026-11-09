@@ -1,9 +1,9 @@
 {
   "translation": {
-    "2–8 MiB concurrency": "2–8 MiB concurrency",
     "360": "360",
     "1000": "1000",
     "10000": "10000",
+    "2–8 MiB concurrency": "2–8 MiB concurrency",
     "> 8 MiB concurrency": "> 8 MiB concurrency",
     "A custom key can only be used for one key at a time": "A custom key can only be used for one key at a time",
     "All keys": "All keys",
@@ -7482,6 +7482,20 @@
     "Zhipu": "Zhipu",
     "Zhipu GLM": "Zhipu GLM",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Collapse sidebar": "Collapse sidebar",
+    "Conversation limit reached": "Conversation limit reached",
+    "Conversations": "Conversations",
+    "Delete an old conversation first.": "Delete an old conversation first.",
+    "Delete conversation": "Delete conversation",
+    "Earlier": "Earlier",
+    "Expand sidebar": "Expand sidebar",
+    "New chat": "New chat",
+    "New conversation": "New conversation",
+    "No conversations": "No conversations yet",
+    "No matching conversations": "No matching conversations",
+    "Search conversations": "Search conversations",
+    "This conversation will be permanently deleted.": "This conversation will be permanently deleted.",
+    "Yesterday": "Yesterday"
   }
 }

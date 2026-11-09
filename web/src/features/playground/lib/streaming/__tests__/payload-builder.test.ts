@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { expect, test } from 'vitest'
 
 import type {
+  ContentPart,
   Message,
   ParameterEnabled,
   PlaygroundConfig,
@@ -63,17 +64,54 @@ test('only the latest user message carries its image upstream', () => {
     userMessage('second', `改背景\n\n![image](${DATA_URL})`),
   ]
 
-  const payload = buildChatCompletionPayload(
-    messages,
-    config,
-    parameterEnabled
-  )
+  const payload = buildChatCompletionPayload(messages, config, parameterEnabled)
 
   expect(payload.messages[0].content).toBe('第一张\n\n[[image-omitted]]')
   expect(payload.messages[2].content).toEqual([
     { type: 'text', text: '改背景' },
     { type: 'image_url', image_url: { url: DATA_URL } },
   ])
+})
+
+test('image models get one assembled prompt with numbered references', () => {
+  const messages = [
+    userMessage('first', `画一只猫\n\n![image](${DATA_URL})`),
+    assistantMessage('reply', `![image](${DATA_URL})`),
+    userMessage('second', '把背景换成雪山'),
+  ]
+
+  const payload = buildChatCompletionPayload(
+    messages,
+    config,
+    parameterEnabled,
+    {
+      imageModel: true,
+    }
+  )
+
+  expect(payload.messages).toHaveLength(1)
+  expect(payload.messages[0].role).toBe('user')
+  expect(Array.isArray(payload.messages[0].content)).toBe(true)
+  const parts = payload.messages[0].content as ContentPart[]
+  expect(parts[0]).toEqual({
+    type: 'text',
+    text: expect.stringContaining('【当前指令】\n把背景换成雪山'),
+  })
+  expect(parts[0].text).toContain('【历史对话】')
+  expect(parts[1]).toEqual({ type: 'image_url', image_url: { url: DATA_URL } })
+  expect(payload.response_format).toBe('b64_json')
+})
+
+test('image models without references send only the current instruction', () => {
+  const payload = buildChatCompletionPayload(
+    [userMessage('plain', '画一条鱼')],
+    config,
+    parameterEnabled,
+    { imageModel: true }
+  )
+
+  expect(payload.messages).toEqual([{ role: 'user', content: '画一条鱼' }])
+  expect(payload.response_format).toBe('b64_json')
 })
 
 test('text-only conversations keep the plain string content', () => {

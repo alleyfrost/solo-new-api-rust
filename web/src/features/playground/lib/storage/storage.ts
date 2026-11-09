@@ -49,12 +49,16 @@ const MIN_PREFIX_COLLAPSE_LENGTH = 2000
 const MIN_REPEATED_SECTION_COUNT = 3
 const SECTION_HEADING_LINE_PATTERN = /^#{2,6}\s+\d+\.\s+.+$/gm
 
+export function getPlaygroundUserId(): number | null {
+  return useAuthStore.getState().auth.user?.id ?? null
+}
+
 function getUserStorageKey(key: string): string | null {
   // Legacy data has no owner; never assign it to the next signed-in account.
   for (const legacyKey of Object.values(STORAGE_KEYS)) {
     localStorage.removeItem(legacyKey)
   }
-  const userId = useAuthStore.getState().auth.user?.id
+  const userId = getPlaygroundUserId()
   return userId == null ? null : `${key}:${userId}`
 }
 
@@ -372,6 +376,22 @@ export function saveParameterEnabled(
   }
 }
 
+/** Validate, normalize, trim and sanitize stored messages. */
+export function normalizeMessages(raw: unknown): Message[] {
+  const parsed = messagesSchema.parse(raw) as Message[]
+  const normalized = parsed.map(normalizeStoredMessageForLoad)
+  return sanitizeMessagesOnLoad(
+    trimMessagesByContentSize(trimMessages(normalized))
+  )
+}
+
+/** Shape messages for storage: cap the list and drop inline image payloads. */
+export function toStoredMessages(messages: Message[]): Message[] {
+  return messagesSchema.parse(
+    trimMessages(messages).map(withoutInlineImages)
+  ) as Message[]
+}
+
 /**
  * Load messages from localStorage
  */
@@ -380,25 +400,10 @@ export function loadMessages(): Message[] | null {
     const saved = readStoredMessagesValue()
     if (!saved) return null
 
-    const parsed = messagesSchema.parse(unwrapStoredValue(saved)) as Message[]
-    const normalized = parsed.map(normalizeStoredMessageForLoad)
-    const normalizedChanged = normalized.some(
-      (message, index) => message !== parsed[index]
-    )
-    const trimmed = trimMessages(normalized)
-    const sizeTrimmed = trimMessagesByContentSize(trimmed)
-    const sanitized = sanitizeMessagesOnLoad(sizeTrimmed)
+    const messages = normalizeMessages(unwrapStoredValue(saved))
+    saveMessages(messages)
 
-    if (
-      normalizedChanged ||
-      trimmed !== normalized ||
-      sizeTrimmed !== trimmed ||
-      sanitized !== sizeTrimmed
-    ) {
-      saveMessages(sanitized)
-    }
-
-    return sanitized
+    return messages
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error('Failed to load messages:', error)
@@ -411,9 +416,7 @@ export function loadMessages(): Message[] | null {
  */
 export function saveMessages(messages: Message[]): void {
   try {
-    const trimmed = trimMessages(messages).map(withoutInlineImages)
-    const parsed = messagesSchema.parse(trimmed) as Message[]
-    writeStoredValue(STORAGE_KEYS.MESSAGES, parsed)
+    writeStoredValue(STORAGE_KEYS.MESSAGES, toStoredMessages(messages))
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error('Failed to save messages:', error)

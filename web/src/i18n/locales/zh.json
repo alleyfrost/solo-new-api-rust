@@ -1,9 +1,9 @@
 {
   "translation": {
-    "2–8 MiB concurrency": "2–8 MiB 并发数",
     "360": "360",
     "1000": "1000",
     "10000": "10000",
+    "2–8 MiB concurrency": "2–8 MiB 并发数",
     "> 8 MiB concurrency": "大于 8 MiB 并发数",
     "A custom key can only be used for one key at a time": "自定义密钥一次只能创建一个",
     "All keys": "全部密钥",
@@ -7482,6 +7482,20 @@
     "Zhipu": "智谱",
     "Zhipu GLM": "智谱GLM",
     "Zhipu V4": "智谱 V4",
-    "Zoom": "缩放"
+    "Zoom": "缩放",
+    "Collapse sidebar": "收起侧边栏",
+    "Conversation limit reached": "会话数量已达上限",
+    "Conversations": "会话",
+    "Delete an old conversation first.": "请先删除一个旧会话。",
+    "Delete conversation": "删除会话",
+    "Earlier": "更早",
+    "Expand sidebar": "展开侧边栏",
+    "New chat": "新对话",
+    "New conversation": "开启新对话",
+    "No conversations": "暂无会话",
+    "No matching conversations": "无匹配会话",
+    "Search conversations": "搜索会话",
+    "This conversation will be permanently deleted.": "该会话将被永久删除。",
+    "Yesterday": "昨天"
   }
 }

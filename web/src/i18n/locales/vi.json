@@ -1,9 +1,9 @@
 {
   "translation": {
-    "2–8 MiB concurrency": "Đồng thời 2–8 MiB",
     "360": "360",
     "1000": "1000",
     "10000": "10000",
+    "2–8 MiB concurrency": "Đồng thời 2–8 MiB",
     "> 8 MiB concurrency": "Đồng thời > 8 MiB",
     "A custom key can only be used for one key at a time": "Khóa tùy chỉnh chỉ tạo được từng khóa một",
     "All keys": "Tất cả khóa",
@@ -7482,6 +7482,20 @@
     "Zhipu": "Zhipu",
     "Zhipu GLM": "Zhipu GLM",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Collapse sidebar": "Thu gọn thanh bên",
+    "Conversation limit reached": "Đã đạt giới hạn hội thoại",
+    "Conversations": "Hội thoại",
+    "Delete an old conversation first.": "Hãy xóa một hội thoại cũ trước.",
+    "Delete conversation": "Xóa hội thoại",
+    "Earlier": "Trước đó",
+    "Expand sidebar": "Mở rộng thanh bên",
+    "New chat": "Cuộc trò chuyện mới",
+    "New conversation": "Bắt đầu cuộc trò chuyện mới",
+    "No conversations": "Chưa có hội thoại",
+    "No matching conversations": "Không có hội thoại phù hợp",
+    "Search conversations": "Tìm kiếm hội thoại",
+    "This conversation will be permanently deleted.": "Hội thoại này sẽ bị xóa vĩnh viễn.",
+    "Yesterday": "Hôm qua"
   }
 }

@@ -1,9 +1,9 @@
 {
   "translation": {
-    "2–8 MiB concurrency": "Параллелизм 2–8 МиБ",
     "360": "360",
     "1000": "1000",
     "10000": "10000",
+    "2–8 MiB concurrency": "Параллелизм 2–8 МиБ",
     "> 8 MiB concurrency": "Параллелизм > 8 МиБ",
     "A custom key can only be used for one key at a time": "Пользовательский ключ можно создавать только по одному",
     "All keys": "Все ключи",
@@ -7482,6 +7482,20 @@
     "Zhipu": "Zhipu",
     "Zhipu GLM": "Zhipu GLM",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Collapse sidebar": "Свернуть боковую панель",
+    "Conversation limit reached": "Достигнут лимит диалогов",
+    "Conversations": "Диалоги",
+    "Delete an old conversation first.": "Сначала удалите старый диалог.",
+    "Delete conversation": "Удалить диалог",
+    "Earlier": "Ранее",
+    "Expand sidebar": "Развернуть боковую панель",
+    "New chat": "Новый диалог",
+    "New conversation": "Новый диалог",
+    "No conversations": "Нет диалогов",
+    "No matching conversations": "Нет подходящих диалогов",
+    "Search conversations": "Поиск диалогов",
+    "This conversation will be permanently deleted.": "Этот диалог будет удалён безвозвратно.",
+    "Yesterday": "Вчера"
   }
 }
