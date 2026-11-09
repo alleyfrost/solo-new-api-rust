@@ -43,6 +43,7 @@ const log = usageLogSchema.parse({
   channel: 372,
   channel_name: longName,
   token_name: 'backend-production-token',
+  ip: '203.0.113.7',
   group: 'enterprise-production',
   quota: 123456789,
   use_time: 1.5,
@@ -199,6 +200,17 @@ it('hides sensitive names and disables full-text inspection when privacy is enab
   expect(
     screen.queryByRole('button', { name: /Token:/ })
   ).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: /IP:/ })).not.toBeInTheDocument()
+})
+
+it('shows the request IP on the mobile summary and opens it on tap', async () => {
+  const user = userEvent.setup()
+  renderLogs()
+  const ipButton = screen.getByRole('button', { name: 'IP: 203.0.113.7' })
+  expect(ipButton).toBeVisible()
+  await user.click(ipButton)
+  const dialog = await screen.findByRole('dialog', { name: 'IP' })
+  expect(within(dialog).getByText('203.0.113.7')).toBeVisible()
 })
 
 it('respects hidden columns and omits admin fields in the self view', () => {

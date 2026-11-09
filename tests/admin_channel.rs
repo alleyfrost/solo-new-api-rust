@@ -193,6 +193,113 @@ async fn multi_key_channel_keeps_newline_keys() {
     let info: serde_json::Value = serde_json::from_str(&info).unwrap();
     assert_eq!(info["is_multi_key"], true);
     assert_eq!(info["multi_key_size"], 2);
+    assert_eq!(info["multi_key_mode"], "random");
+}
+
+#[tokio::test]
+async fn multi_key_mode_from_request_is_persisted_on_create_and_update() {
+    let (app, pool, _) = setup().await;
+    let (status, body) = call(
+        &app,
+        "POST",
+        "/api/channel",
+        Some(serde_json::json!({
+            "mode": "multi_to_single",
+            "multi_key_mode": "polling",
+            "channel": {
+                "type": 1, "name": "multi", "key": "a\nb\n", "status": 1,
+                "models": "m1", "group": "default"
+            }
+        })),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    let id = body["data"][0].as_i64().unwrap();
+    let info: String = sqlx::query_scalar("SELECT channel_info FROM channels WHERE id=?")
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let info: serde_json::Value = serde_json::from_str(&info).unwrap();
+    assert_eq!(info["multi_key_mode"], "polling");
+    assert_eq!(info["is_multi_key"], true);
+    assert_eq!(info["multi_key_size"], 2);
+
+    let (status, updated) = call(
+        &app,
+        "PUT",
+        "/api/channel/",
+        Some(serde_json::json!({"id": id, "multi_key_mode": "random"})),
+    )
+    .await;
+    assert_eq!(status, 200, "{updated}");
+    assert_eq!(updated["data"]["channel_info"]["multi_key_mode"], "random");
+    assert_eq!(updated["data"]["channel_info"]["is_multi_key"], true);
+
+    let (status, rejected) = call(
+        &app,
+        "POST",
+        "/api/channel",
+        Some(serde_json::json!({
+            "mode": "multi_to_single",
+            "multi_key_mode": "bogus",
+            "channel": {
+                "type": 1, "name": "bad", "key": "a", "status": 1,
+                "models": "m1", "group": "default"
+            }
+        })),
+    )
+    .await;
+    assert_eq!(status, 400, "{rejected}");
+}
+
+#[tokio::test]
+async fn updating_multi_key_mode_keeps_other_channel_info_fields() {
+    let (app, pool, _) = setup().await;
+    let (status, body) = call(
+        &app,
+        "POST",
+        "/api/channel",
+        Some(serde_json::json!({
+            "mode": "single",
+            "channel": {
+                "type": 1, "name": "multi", "key": "a\nb", "status": 1,
+                "models": "m1", "group": "default",
+                "channel_info": {
+                    "is_multi_key": true,
+                    "multi_key_size": 2,
+                    "multi_key_polling_index": 0,
+                    "multi_key_mode": "random",
+                    "custom": {"keep": 7}
+                }
+            }
+        })),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    let id = body["data"][0].as_i64().unwrap();
+
+    let (status, updated) = call(
+        &app,
+        "PUT",
+        "/api/channel/",
+        Some(serde_json::json!({"id": id, "multi_key_mode": "polling"})),
+    )
+    .await;
+    assert_eq!(status, 200, "{updated}");
+    let info = &updated["data"]["channel_info"];
+    assert_eq!(info["multi_key_mode"], "polling");
+    assert_eq!(info["is_multi_key"], true);
+    assert_eq!(info["multi_key_size"], 2);
+    assert_eq!(info["custom"]["keep"], 7);
+
+    let raw: String = sqlx::query_scalar("SELECT channel_info FROM channels WHERE id=?")
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let raw: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(raw["custom"]["keep"], 7);
 }
 
 #[tokio::test]

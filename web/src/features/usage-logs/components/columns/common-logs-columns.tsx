@@ -251,6 +251,19 @@ export function useCommonLogsColumns(
           )
         },
       })
+      columns.push({
+        accessorKey: 'ip',
+        header: t('IP'),
+        cell: ({ row }) => {
+          const ip = (row.getValue('ip') as string) || ''
+          if (!ip) {
+            return <span className='text-muted-foreground text-xs'>-</span>
+          }
+
+          return <span className='font-mono text-xs'>{ip}</span>
+        },
+        size: 130,
+      })
     }
 
     columns.push({

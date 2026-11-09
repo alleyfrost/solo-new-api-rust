@@ -25,6 +25,7 @@ pub struct ChannelQuery {
 pub struct AddChannelInput {
     #[serde(default)]
     pub mode: Option<String>,
+    pub multi_key_mode: Option<String>,
     pub channel: ChannelInput,
 }
 
@@ -34,6 +35,7 @@ pub struct ChannelInput {
     pub r#type: Option<i64>,
     pub key: Option<String>,
     pub key_mode: Option<String>,
+    pub multi_key_mode: Option<String>,
     pub status: Option<i64>,
     pub name: Option<String>,
     pub models: Option<String>,
@@ -145,6 +147,28 @@ fn channel_info(value: Option<&Value>) -> String {
         })
         .to_string(),
     }
+}
+
+fn explicit_key_mode(value: Option<&str>) -> Result<Option<&'static str>, ApiError> {
+    match value.map(str::trim) {
+        None | Some("") => Ok(None),
+        Some("polling") => Ok(Some("polling")),
+        Some("random") => Ok(Some("random")),
+        Some(other) => Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            format!("invalid multi_key_mode: {other}"),
+        )),
+    }
+}
+
+/// 只改 `multi_key_mode`，其余 `channel_info` 字段原样保留。
+fn set_multi_key_mode(info: String, mode: &str) -> String {
+    let mut value: Value = serde_json::from_str(&info)
+        .ok()
+        .filter(Value::is_object)
+        .unwrap_or_else(|| json!({}));
+    value["multi_key_mode"] = Value::String(mode.to_string());
+    value.to_string()
 }
 
 fn channel_json(channel: &ChannelRow) -> Value {
@@ -394,6 +418,7 @@ pub async fn create(
     Json(input): Json<AddChannelInput>,
 ) -> Result<axum::response::Response, ApiError> {
     let channel = input.channel;
+    let requested_mode = explicit_key_mode(input.multi_key_mode.as_deref())?;
     let name = channel
         .name
         .clone()
@@ -424,9 +449,11 @@ pub async fn create(
             "is_multi_key": true,
             "multi_key_size": key_count,
             "multi_key_polling_index": 0,
-            "multi_key_mode": "random"
+            "multi_key_mode": requested_mode.unwrap_or("random")
         })
         .to_string();
+    } else if let Some(mode) = requested_mode {
+        info = set_multi_key_mode(info, mode);
     }
     let mut created = Vec::new();
     for (index, key) in keys.iter().enumerate() {
@@ -469,6 +496,7 @@ pub async fn update(
     let current = load_channel(&state, id)
         .await?
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "channel not found"))?;
+    let requested_mode = explicit_key_mode(input.multi_key_mode.as_deref())?;
 
     let key = match input.key.as_deref().map(str::trim) {
         Some(k) if !k.is_empty() => {
@@ -497,6 +525,10 @@ pub async fn update(
     let info = match input.channel_info.as_ref() {
         Some(_) => channel_info(input.channel_info.as_ref()),
         None => current.channel_info.clone().unwrap_or_else(|| channel_info(None)),
+    };
+    let info = match requested_mode {
+        Some(mode) => set_multi_key_mode(info, mode),
+        None => info,
     };
     sqlx::query(
         "UPDATE channels SET type=?, `key`=?, status=?, name=?, weight=?, base_url=?, other=?, models=?, `group`=?, model_mapping=?, status_code_mapping=?, priority=?, auto_ban=?, other_info=?, tag=?, setting=?, param_override=?, header_override=?, remark=?, channel_info=?, settings=?, open_ai_organization=?, test_model=? WHERE id=?",
