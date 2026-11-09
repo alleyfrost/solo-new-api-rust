@@ -37,13 +37,15 @@ import {
   isAssistantMessageFinal,
   isAssistantMessagePending,
 } from '../lib'
+import type { MessageStateUpdater } from '../lib/state/playground-state-utils'
 import type { Message, PlaygroundConfig, ParameterEnabled } from '../types'
-import { useStreamRequest } from './use-stream-request'
+import { createPlaygroundStreamRequest } from './use-stream-request'
 
 interface UseChatHandlerOptions {
+  activeSessionId: string | null
   config: PlaygroundConfig
   parameterEnabled: ParameterEnabled
-  onMessageUpdate: (updater: (prev: Message[]) => Message[]) => void
+  onMessageUpdate: (sessionId: string, updater: MessageStateUpdater) => void
 }
 
 const KNOWN_ERROR_MESSAGES = new Set<string>(Object.values(ERROR_MESSAGES))
@@ -53,6 +55,24 @@ type PendingStreamChunks = {
   generation: number
   content: string
   reasoning: string
+}
+
+type GenerationTask = {
+  generation: number
+  stream: ReturnType<typeof createPlaygroundStreamRequest> | null
+  abortController: AbortController | null
+  pending: PendingStreamChunks
+  flushTimer: number | null
+}
+
+function createGenerationTask(): GenerationTask {
+  return {
+    generation: 0,
+    stream: null,
+    abortController: null,
+    pending: { generation: 0, content: '', reasoning: '' },
+    flushTimer: null,
+  }
 }
 
 function mergePendingStreamChunk(
@@ -70,6 +90,7 @@ function mergePendingStreamChunk(
  * Hook for handling chat message sending and receiving
  */
 export function useChatHandler({
+  activeSessionId,
   config,
   parameterEnabled,
   onMessageUpdate,
@@ -80,50 +101,73 @@ export function useChatHandler({
     ? (status.image_models as string[])
     : []
   const imageModel = imageModels.includes(config.model)
-  const { sendStreamRequest, stopStream, isStreaming } = useStreamRequest()
-  const [isRequesting, setIsRequesting] = useState(false)
-  const abortControllerRef = useRef<AbortController | null>(null)
-  const requestGenerationRef = useRef(0)
-  const pendingStreamChunksRef = useRef<PendingStreamChunks>({
-    generation: 0,
-    content: '',
-    reasoning: '',
-  })
-  const streamFlushTimerRef = useRef<number | null>(null)
 
-  const discardPendingStreamUpdates = useCallback((generation: number) => {
-    if (streamFlushTimerRef.current !== null) {
-      window.clearTimeout(streamFlushTimerRef.current)
-      streamFlushTimerRef.current = null
+  const tasksRef = useRef(new Map<string, GenerationTask>())
+  const runningRef = useRef(new Set<string>())
+  const [runningSessionIds, setRunningSessionIds] = useState<
+    ReadonlySet<string>
+  >(() => new Set())
+  const activeSessionIdRef = useRef(activeSessionId)
+  activeSessionIdRef.current = activeSessionId
+
+  const setSessionRunning = useCallback(
+    (sessionId: string, running: boolean) => {
+      if (runningRef.current.has(sessionId) === running) return
+      if (running) {
+        runningRef.current.add(sessionId)
+      } else {
+        runningRef.current.delete(sessionId)
+      }
+      setRunningSessionIds(new Set(runningRef.current))
+    },
+    []
+  )
+
+  const getTask = useCallback((sessionId: string) => {
+    let task = tasksRef.current.get(sessionId)
+    if (!task) {
+      task = createGenerationTask()
+      tasksRef.current.set(sessionId, task)
     }
-    pendingStreamChunksRef.current = {
-      generation,
-      content: '',
-      reasoning: '',
-    }
+    return task
   }, [])
 
+  const discardPendingStreamUpdates = useCallback(
+    (task: GenerationTask, generation: number) => {
+      if (task.flushTimer !== null) {
+        window.clearTimeout(task.flushTimer)
+        task.flushTimer = null
+      }
+      task.pending = {
+        generation,
+        content: '',
+        reasoning: '',
+      }
+    },
+    []
+  )
+
   const flushStreamUpdates = useCallback(
-    (generation: number) => {
-      if (generation !== requestGenerationRef.current) return
-      if (streamFlushTimerRef.current !== null) {
-        window.clearTimeout(streamFlushTimerRef.current)
-        streamFlushTimerRef.current = null
+    (sessionId: string, task: GenerationTask, generation: number) => {
+      if (generation !== task.generation) return
+      if (task.flushTimer !== null) {
+        window.clearTimeout(task.flushTimer)
+        task.flushTimer = null
       }
 
-      const pendingChunks = pendingStreamChunksRef.current
+      const pendingChunks = task.pending
       if (pendingChunks.generation !== generation) return
       if (!pendingChunks.reasoning && !pendingChunks.content) {
         return
       }
 
-      pendingStreamChunksRef.current = {
+      task.pending = {
         generation,
         content: '',
         reasoning: '',
       }
-      onMessageUpdate((prev) => {
-        if (generation !== requestGenerationRef.current) return prev
+      onMessageUpdate(sessionId, (prev) => {
+        if (generation !== task.generation) return prev
         return updateLastAssistantMessage(prev, (message) => {
           let updatedMessage = message
 
@@ -151,14 +195,15 @@ export function useChatHandler({
   )
 
   const scheduleStreamFlush = useCallback(
-    (generation: number) => {
-      if (generation !== requestGenerationRef.current) return
-      if (streamFlushTimerRef.current !== null) {
+    (sessionId: string, task: GenerationTask, generation: number) => {
+      if (generation !== task.generation) return
+      if (task.flushTimer !== null) {
         return
       }
 
-      streamFlushTimerRef.current = window.setTimeout(() => {
-        flushStreamUpdates(generation)
+      task.flushTimer = window.setTimeout(() => {
+        task.flushTimer = null
+        flushStreamUpdates(sessionId, task, generation)
       }, STREAM_UPDATE_FLUSH_MS)
     },
     [flushStreamUpdates]
@@ -166,12 +211,17 @@ export function useChatHandler({
 
   useEffect(
     () => () => {
-      requestGenerationRef.current += 1
-      if (streamFlushTimerRef.current !== null) {
-        window.clearTimeout(streamFlushTimerRef.current)
+      for (const task of tasksRef.current.values()) {
+        task.generation += 1
+        if (task.flushTimer !== null) {
+          window.clearTimeout(task.flushTimer)
+          task.flushTimer = null
+        }
+        task.stream?.dispose()
+        task.abortController?.abort()
       }
-      abortControllerRef.current?.abort()
-      abortControllerRef.current = null
+      tasksRef.current.clear()
+      runningRef.current.clear()
     },
     []
   )
@@ -194,28 +244,29 @@ export function useChatHandler({
     [t]
   )
 
-  // Handle stream update
   const handleStreamUpdate = useCallback(
-    (generation: number, type: 'reasoning' | 'content', chunk: string) => {
-      if (generation !== requestGenerationRef.current) return
-      if (pendingStreamChunksRef.current.generation !== generation) return
-      pendingStreamChunksRef.current[type] = mergePendingStreamChunk(
-        pendingStreamChunksRef.current[type],
-        chunk
-      )
-      scheduleStreamFlush(generation)
+    (
+      sessionId: string,
+      task: GenerationTask,
+      generation: number,
+      type: 'reasoning' | 'content',
+      chunk: string
+    ) => {
+      if (generation !== task.generation) return
+      if (task.pending.generation !== generation) return
+      task.pending[type] = mergePendingStreamChunk(task.pending[type], chunk)
+      scheduleStreamFlush(sessionId, task, generation)
     },
     [scheduleStreamFlush]
   )
 
-  // Handle stream complete
   const handleStreamComplete = useCallback(
-    (generation: number) => {
-      if (generation !== requestGenerationRef.current) return
-      flushStreamUpdates(generation)
-      setIsRequesting(false)
-      onMessageUpdate((prev) => {
-        if (generation !== requestGenerationRef.current) return prev
+    (sessionId: string, task: GenerationTask, generation: number) => {
+      if (generation !== task.generation) return
+      flushStreamUpdates(sessionId, task, generation)
+      setSessionRunning(sessionId, false)
+      onMessageUpdate(sessionId, (prev) => {
+        if (generation !== task.generation) return prev
         return updateLastAssistantMessage(prev, (message) =>
           isAssistantMessageFinal(message)
             ? message
@@ -223,20 +274,25 @@ export function useChatHandler({
         )
       })
     },
-    [flushStreamUpdates, onMessageUpdate]
+    [flushStreamUpdates, onMessageUpdate, setSessionRunning]
   )
 
-  // Handle stream error
   const handleStreamError = useCallback(
-    (generation: number, error: string, errorCode?: string) => {
-      if (generation !== requestGenerationRef.current) return
-      flushStreamUpdates(generation)
-      setIsRequesting(false)
+    (
+      sessionId: string,
+      task: GenerationTask,
+      generation: number,
+      error: string,
+      errorCode?: string
+    ) => {
+      if (generation !== task.generation) return
+      flushStreamUpdates(sessionId, task, generation)
+      setSessionRunning(sessionId, false)
       const displayError = getDisplayError(error)
       handleServerError(new Error(displayError))
       const errorTitle = t(ERROR_MESSAGES.API_REQUEST_ERROR)
-      onMessageUpdate((prev) => {
-        if (generation !== requestGenerationRef.current) return prev
+      onMessageUpdate(sessionId, (prev) => {
+        if (generation !== task.generation) return prev
         return updateAssistantMessageWithError(
           prev,
           displayError,
@@ -245,36 +301,40 @@ export function useChatHandler({
         )
       })
     },
-    [flushStreamUpdates, getDisplayError, onMessageUpdate, t]
+    [flushStreamUpdates, getDisplayError, onMessageUpdate, setSessionRunning, t]
   )
 
-  // Send streaming chat request
   const sendStreamingChat = useCallback(
-    (messages: Message[]) => {
-      const generation = requestGenerationRef.current + 1
-      requestGenerationRef.current = generation
-      abortControllerRef.current?.abort()
-      abortControllerRef.current = null
-      discardPendingStreamUpdates(generation)
-      setIsRequesting(true)
+    (sessionId: string, messages: Message[]) => {
+      const task = getTask(sessionId)
+      const generation = task.generation + 1
+      task.generation = generation
+      task.stream?.stop()
+      discardPendingStreamUpdates(task, generation)
+      if (!task.stream) {
+        task.stream = createPlaygroundStreamRequest()
+      }
+      setSessionRunning(sessionId, true)
       const payload = buildChatCompletionPayload(
         messages,
         config,
         parameterEnabled,
         { imageModel }
       )
-      void sendStreamRequest(
-        payload,
-        (type, chunk) => handleStreamUpdate(generation, type, chunk),
-        () => handleStreamComplete(generation),
-        (error, errorCode) => handleStreamError(generation, error, errorCode)
-      )
+      void task.stream.send(payload, {
+        onUpdate: (type, chunk) =>
+          handleStreamUpdate(sessionId, task, generation, type, chunk),
+        onComplete: () => handleStreamComplete(sessionId, task, generation),
+        onError: (error, errorCode) =>
+          handleStreamError(sessionId, task, generation, error, errorCode),
+      })
     },
     [
       config,
       parameterEnabled,
       imageModel,
-      sendStreamRequest,
+      getTask,
+      setSessionRunning,
       discardPendingStreamUpdates,
       handleStreamUpdate,
       handleStreamComplete,
@@ -282,44 +342,46 @@ export function useChatHandler({
     ]
   )
 
-  // Send non-streaming chat request
   const sendNonStreamingChat = useCallback(
-    async (messages: Message[]) => {
+    async (sessionId: string, messages: Message[]) => {
+      const task = getTask(sessionId)
+      const generation = task.generation + 1
+      task.generation = generation
+      task.stream?.stop()
+      discardPendingStreamUpdates(task, generation)
+      task.abortController?.abort()
+      const abortController = new AbortController()
+      task.abortController = abortController
+      setSessionRunning(sessionId, true)
+
       const payload = buildChatCompletionPayload(
         messages,
         config,
         parameterEnabled,
         { imageModel }
       )
-      const generation = requestGenerationRef.current + 1
-      const abortController = new AbortController()
-
-      requestGenerationRef.current = generation
-      stopStream()
-      discardPendingStreamUpdates(generation)
-      abortControllerRef.current?.abort()
-      abortControllerRef.current = abortController
 
       try {
-        setIsRequesting(true)
         const response = await sendChatCompletion(
           payload,
           abortController.signal
         )
-        if (
-          abortController.signal.aborted ||
-          requestGenerationRef.current !== generation
-        ) {
+        if (abortController.signal.aborted || task.generation !== generation) {
           return
         }
 
         if (!hasChatCompletionChoice(response)) {
-          handleStreamError(generation, ERROR_MESSAGES.API_REQUEST_ERROR)
+          handleStreamError(
+            sessionId,
+            task,
+            generation,
+            ERROR_MESSAGES.API_REQUEST_ERROR
+          )
           return
         }
 
-        onMessageUpdate((prev) => {
-          if (requestGenerationRef.current !== generation) return prev
+        onMessageUpdate(sessionId, (prev) => {
+          if (task.generation !== generation) return prev
           return updateLastAssistantMessage(prev, (message) => {
             const updatedMessage = applyChatCompletionResponse(
               message,
@@ -330,19 +392,16 @@ export function useChatHandler({
           })
         })
       } catch (error: unknown) {
-        if (
-          abortController.signal.aborted ||
-          requestGenerationRef.current !== generation
-        ) {
+        if (abortController.signal.aborted || task.generation !== generation) {
           return
         }
 
         const { errorCode, errorMessage } = parseRequestErrorDetails(error)
-        handleStreamError(generation, errorMessage, errorCode)
+        handleStreamError(sessionId, task, generation, errorMessage, errorCode)
       } finally {
-        if (requestGenerationRef.current === generation) {
-          abortControllerRef.current = null
-          setIsRequesting(false)
+        if (task.generation === generation) {
+          task.abortController = null
+          setSessionRunning(sessionId, false)
         }
       }
     },
@@ -350,54 +409,79 @@ export function useChatHandler({
       config,
       parameterEnabled,
       imageModel,
-      stopStream,
+      getTask,
+      setSessionRunning,
       discardPendingStreamUpdates,
       onMessageUpdate,
       handleStreamError,
     ]
   )
 
-  // Send chat request (stream or non-stream based on config)
+  // Send in the active conversation; other conversations keep their own task.
   const sendChat = useCallback(
     (messages: Message[]) => {
+      const sessionId = activeSessionIdRef.current
+      if (!sessionId || runningRef.current.has(sessionId)) return
       if (config.stream) {
-        sendStreamingChat(messages)
+        sendStreamingChat(sessionId, messages)
       } else {
-        sendNonStreamingChat(messages)
+        void sendNonStreamingChat(sessionId, messages)
       }
     },
     [config.stream, sendStreamingChat, sendNonStreamingChat]
   )
 
-  // Stop generation
-  const stopGeneration = useCallback(() => {
-    const stoppedGeneration = requestGenerationRef.current
-    flushStreamUpdates(stoppedGeneration)
-    const idleGeneration = stoppedGeneration + 1
-    requestGenerationRef.current = idleGeneration
-    discardPendingStreamUpdates(idleGeneration)
-    stopStream()
-    abortControllerRef.current?.abort()
-    abortControllerRef.current = null
-    setIsRequesting(false)
-    onMessageUpdate((prev) => {
-      if (requestGenerationRef.current !== idleGeneration) return prev
-      return updateLastAssistantMessage(prev, (message) =>
-        isAssistantMessagePending(message)
-          ? completeAssistantMessage(message)
-          : message
-      )
-    })
-  }, [
-    stopStream,
-    flushStreamUpdates,
-    discardPendingStreamUpdates,
-    onMessageUpdate,
-  ])
+  const stopGeneration = useCallback(
+    (targetSessionId?: string) => {
+      const sessionId = targetSessionId ?? activeSessionIdRef.current
+      if (!sessionId) return
+      const task = tasksRef.current.get(sessionId)
+      if (!task) return
+
+      const stoppedGeneration = task.generation
+      flushStreamUpdates(sessionId, task, stoppedGeneration)
+      const idleGeneration = stoppedGeneration + 1
+      task.generation = idleGeneration
+      discardPendingStreamUpdates(task, idleGeneration)
+      task.stream?.stop()
+      task.abortController?.abort()
+      task.abortController = null
+      setSessionRunning(sessionId, false)
+      onMessageUpdate(sessionId, (prev) => {
+        if (task.generation !== idleGeneration) return prev
+        return updateLastAssistantMessage(prev, (message) =>
+          isAssistantMessagePending(message)
+            ? completeAssistantMessage(message)
+            : message
+        )
+      })
+    },
+    [
+      flushStreamUpdates,
+      discardPendingStreamUpdates,
+      onMessageUpdate,
+      setSessionRunning,
+    ]
+  )
+
+  const cancelSessionGeneration = useCallback(
+    (sessionId: string) => {
+      stopGeneration(sessionId)
+      const task = tasksRef.current.get(sessionId)
+      if (!task) return
+      task.stream?.dispose()
+      tasksRef.current.delete(sessionId)
+    },
+    [stopGeneration]
+  )
 
   return {
     sendChat,
     stopGeneration,
-    isGenerating: isStreaming || isRequesting,
+    cancelSessionGeneration,
+    runningSessionIds,
+    isGenerating: activeSessionId
+      ? runningSessionIds.has(activeSessionId)
+      : false,
   }
 }

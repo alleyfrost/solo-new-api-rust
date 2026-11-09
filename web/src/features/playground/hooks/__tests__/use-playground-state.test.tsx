@@ -24,6 +24,7 @@ import { useAuthStore, type AuthUser } from '@/stores/auth-store'
 import {
   DEFAULT_CONFIG,
   DEFAULT_PARAMETER_ENABLED,
+  MESSAGE_STATUS,
   STORAGE_KEYS,
 } from '../../constants'
 import type { Message } from '../../types'
@@ -74,6 +75,16 @@ function writeIndex(sessions: unknown[], activeId: string | null) {
 
 function userMessage(key: string, content: string): Message {
   return { key, from: 'user', versions: [{ id: `${key}-v`, content }] }
+}
+
+function pendingAssistant(key: string): Message {
+  return {
+    key,
+    from: 'assistant',
+    versions: [{ id: `${key}-v`, content: '' }],
+    status: MESSAGE_STATUS.LOADING,
+    startedAt: Date.now(),
+  }
 }
 
 beforeEach(() => {
@@ -151,6 +162,67 @@ test('the first user message becomes the session title and persists', async () =
     localStorage.getItem(`playground_session_messages:${USER_ID}:a`) ?? '{}'
   )
   expect(stored.data).toHaveLength(1)
+})
+
+test('streamed updates land on the originating conversation while another is active', async () => {
+  const now = Date.now()
+  const first = writeSession(
+    'a',
+    '会话 A',
+    [userMessage('a1', 'A 内容')],
+    'model-a',
+    now
+  )
+  const second = writeSession('b', '会话 B', [], 'model-b', now - 1000)
+  writeIndex([first, second], 'a')
+
+  const { result } = renderHook(() => usePlaygroundState())
+  await waitFor(() => expect(result.current.isLoadingMessages).toBe(false))
+  expect(result.current.messages).toHaveLength(1)
+
+  act(() => {
+    result.current.updateMessages([
+      ...result.current.messages,
+      pendingAssistant('a2'),
+    ])
+  })
+
+  act(() => result.current.selectSession('b'))
+  await waitFor(() => expect(result.current.activeId).toBe('b'))
+  await waitFor(() => expect(result.current.messages).toEqual([]))
+
+  act(() => {
+    result.current.updateSessionMessages('a', (prev) =>
+      prev.map((message) =>
+        message.key === 'a2'
+          ? {
+              ...message,
+              versions: [{ id: 'a2-v', content: 'A 流式内容' }],
+              status: MESSAGE_STATUS.COMPLETE,
+            }
+          : message
+      )
+    )
+  })
+
+  // The active conversation is untouched by the background write.
+  expect(result.current.messages).toEqual([])
+
+  await waitFor(
+    () => {
+      const stored = JSON.parse(
+        localStorage.getItem(`playground_session_messages:${USER_ID}:a`) ?? '{}'
+      )
+      expect(stored.data?.[1]?.versions?.[0]?.content).toBe('A 流式内容')
+    },
+    { timeout: 3000 }
+  )
+
+  act(() => result.current.selectSession('a'))
+  await waitFor(() => expect(result.current.activeId).toBe('a'))
+  await waitFor(() =>
+    expect(result.current.messages[1]?.versions[0]?.content).toBe('A 流式内容')
+  )
 })
 
 test('a new conversation inherits the current config and becomes active', async () => {

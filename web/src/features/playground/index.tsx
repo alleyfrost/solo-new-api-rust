@@ -50,6 +50,7 @@ export function Playground() {
     activeId,
     draft,
     updateMessages,
+    updateSessionMessages,
     setModels,
     setGroups,
     updateConfig,
@@ -62,10 +63,17 @@ export function Playground() {
     clearMessages,
   } = usePlaygroundState()
 
-  const { sendChat, stopGeneration, isGenerating } = useChatHandler({
+  const {
+    sendChat,
+    stopGeneration,
+    cancelSessionGeneration,
+    runningSessionIds,
+    isGenerating,
+  } = useChatHandler({
+    activeSessionId: activeId,
     config,
     parameterEnabled,
-    onMessageUpdate: updateMessages,
+    onMessageUpdate: updateSessionMessages,
   })
 
   const {
@@ -103,6 +111,7 @@ export function Playground() {
   }
 
   const handleDeleteSession = (sessionId: string) => {
+    cancelSessionGeneration(sessionId)
     void deleteSession(sessionId)
   }
 
@@ -121,8 +130,8 @@ export function Playground() {
     <PlaygroundSessionSidebar
       activeId={activeId}
       collapsed={collapsed}
-      disabled={isGenerating}
       embedded={options.embedded}
+      runningSessionIds={runningSessionIds}
       onCreate={handleCreateSession}
       onDelete={handleDeleteSession}
       onRename={renameSession}
@@ -194,7 +203,7 @@ export function Playground() {
             onGroupChange={(value) => updateConfig('group', value)}
             onModelChange={(value) => updateConfig('model', value)}
             onParameterEnabledChange={updateParameterEnabled}
-            onStop={stopGeneration}
+            onStop={() => stopGeneration()}
             onSubmit={handleSendMessage}
             parameterEnabled={parameterEnabled}
             hasMessages={messages.length > 0}

@@ -20,6 +20,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { DEFAULT_CONFIG, DEFAULT_PARAMETER_ENABLED } from '../constants'
 import { removeInlineImages } from '../lib/message/message-images'
+import { isAssistantMessagePending } from '../lib/message/message-streaming-utils'
 import { getMessageContent } from '../lib/message/message-utils'
 import {
   createSessionMeta,
@@ -89,6 +90,11 @@ export function usePlaygroundState() {
 
   const [messages, setMessages] = useState<Message[]>([])
   const messagesRef = useRef<Message[]>([])
+  // Which session the in-memory list belongs to, so switches in flight do not
+  // attribute streamed chunks to the wrong conversation.
+  const messagesSessionIdRef = useRef<string | null>(null)
+  // Live lists for conversations that keep generating after being switched away.
+  const backgroundMessagesRef = useRef(new Map<string, Message[]>())
   const [draft, setDraft] = useState('')
   const draftRef = useRef('')
   const draftsRef = useRef<SessionDrafts>(readDrafts())
@@ -98,11 +104,8 @@ export function usePlaygroundState() {
   const [models, setModels] = useState<ModelOption[]>([])
   const [groups, setGroups] = useState<GroupOption[]>([])
 
-  const messageTimerRef = useRef<number | null>(null)
-  const messagePendingRef = useRef<{
-    sessionId: string
-    messages: Message[]
-  } | null>(null)
+  const saveTimersRef = useRef(new Map<string, number>())
+  const savePendingRef = useRef(new Map<string, Message[]>())
   const writeChainRef = useRef<Promise<void>>(Promise.resolve())
   const draftTimerRef = useRef<number | null>(null)
   const loadTokenRef = useRef(0)
@@ -178,47 +181,88 @@ export function usePlaygroundState() {
     return writeChainRef.current
   }, [])
 
+  const flushSessionMessages = useCallback(
+    async (sessionId: string) => {
+      const timer = saveTimersRef.current.get(sessionId)
+      if (timer !== undefined) {
+        window.clearTimeout(timer)
+        saveTimersRef.current.delete(sessionId)
+      }
+      const pending = savePendingRef.current.get(sessionId)
+      if (!pending) {
+        await writeChainRef.current
+        return
+      }
+      savePendingRef.current.delete(sessionId)
+      touchSession(sessionId, pending)
+      await enqueuePersist(sessionId, pending)
+    },
+    [enqueuePersist, touchSession]
+  )
+
   const flushMessages = useCallback(async () => {
-    if (messageTimerRef.current !== null) {
-      window.clearTimeout(messageTimerRef.current)
-      messageTimerRef.current = null
-    }
-    const pending = messagePendingRef.current
-    messagePendingRef.current = null
-    if (!pending) {
+    const sessionIds = [...savePendingRef.current.keys()]
+    if (sessionIds.length === 0) {
       await writeChainRef.current
       return
     }
-    touchSession(pending.sessionId, pending.messages)
-    await enqueuePersist(pending.sessionId, pending.messages)
-  }, [enqueuePersist, touchSession])
+    for (const sessionId of sessionIds) {
+      await flushSessionMessages(sessionId)
+    }
+  }, [flushSessionMessages])
 
   const scheduleMessageSave = useCallback(
     (sessionId: string, list: Message[]) => {
-      if (!loadedRef.current) return
-      messagePendingRef.current = { sessionId, messages: list }
-      if (messageTimerRef.current !== null) {
-        window.clearTimeout(messageTimerRef.current)
+      if (sessionId === indexRef.current.activeId && !loadedRef.current) {
+        return
       }
-      messageTimerRef.current = window.setTimeout(() => {
-        messageTimerRef.current = null
-        void flushMessages()
-      }, MESSAGE_SAVE_DEBOUNCE_MS)
+      savePendingRef.current.set(sessionId, list)
+      const existing = saveTimersRef.current.get(sessionId)
+      if (existing !== undefined) {
+        window.clearTimeout(existing)
+      }
+      saveTimersRef.current.set(
+        sessionId,
+        window.setTimeout(() => {
+          saveTimersRef.current.delete(sessionId)
+          void flushSessionMessages(sessionId)
+        }, MESSAGE_SAVE_DEBOUNCE_MS)
+      )
     },
-    [flushMessages]
+    [flushSessionMessages]
+  )
+
+  const updateSessionMessages = useCallback(
+    (sessionId: string, updater: MessageStateUpdater) => {
+      if (
+        sessionId === indexRef.current.activeId &&
+        messagesSessionIdRef.current === sessionId
+      ) {
+        const next = applyMessageStateUpdate(messagesRef.current, updater)
+        messagesRef.current = next
+        setMessages(next)
+        scheduleMessageSave(sessionId, next)
+        return
+      }
+
+      // Not (or not yet) the loaded list: keep streaming into its buffer.
+      const buffered = backgroundMessagesRef.current.get(sessionId)
+      if (!buffered) return
+      const next = applyMessageStateUpdate(buffered, updater)
+      backgroundMessagesRef.current.set(sessionId, next)
+      scheduleMessageSave(sessionId, next)
+    },
+    [scheduleMessageSave]
   )
 
   const updateMessages = useCallback(
     (updater: MessageStateUpdater) => {
-      const next = applyMessageStateUpdate(messagesRef.current, updater)
-      messagesRef.current = next
-      setMessages(next)
       const sessionId = indexRef.current.activeId
       if (sessionId) {
-        scheduleMessageSave(sessionId, next)
+        updateSessionMessages(sessionId, updater)
       }
     },
-    [scheduleMessageSave]
+    [updateSessionMessages]
   )
 
   const patchActiveMeta = useCallback(
@@ -259,6 +303,23 @@ export function usePlaygroundState() {
     [patchActiveMeta]
   )
 
+  const applyStoredDraft = useCallback((sessionId: string) => {
+    const storedDraft = draftsRef.current[sessionId] ?? ''
+    draftRef.current = storedDraft
+    setDraft(storedDraft)
+  }, [])
+
+  /**
+   * A conversation switched away from keeps receiving streamed chunks, so its
+   * live list is parked here instead of being rehydrated from storage.
+   */
+  const stashOutgoingMessages = useCallback(() => {
+    const sessionId = indexRef.current.activeId
+    if (!sessionId || messagesSessionIdRef.current !== sessionId) return
+    if (!messagesRef.current.some(isAssistantMessagePending)) return
+    backgroundMessagesRef.current.set(sessionId, messagesRef.current)
+  }, [])
+
   // Persist the freshly created or migrated index so the active session sticks.
   useEffect(() => {
     saveSessionIndex(indexRef.current)
@@ -268,7 +329,15 @@ export function usePlaygroundState() {
   useEffect(() => {
     if (!activeId) {
       messagesRef.current = []
+      messagesSessionIdRef.current = null
       setMessages([])
+      setIsLoadingMessages(false)
+      return
+    }
+    if (messagesSessionIdRef.current === activeId) {
+      // selectSession already swapped the live list in.
+      applyStoredDraft(activeId)
+      loadedRef.current = true
       setIsLoadingMessages(false)
       return
     }
@@ -282,17 +351,24 @@ export function usePlaygroundState() {
       // Never read a session before its pending debounced write has landed.
       await flushMessages()
       if (token !== loadTokenRef.current) return
-      const loaded = await loadSessionMessages(activeId)
-      if (token !== loadTokenRef.current) return
-      messagesRef.current = loaded
-      setMessages(loaded)
-      const storedDraft = draftsRef.current[activeId] ?? ''
-      draftRef.current = storedDraft
-      setDraft(storedDraft)
+      const buffered = backgroundMessagesRef.current.get(activeId)
+      if (buffered) {
+        backgroundMessagesRef.current.delete(activeId)
+        messagesRef.current = buffered
+        messagesSessionIdRef.current = activeId
+        setMessages(buffered)
+      } else {
+        const loaded = await loadSessionMessages(activeId)
+        if (token !== loadTokenRef.current) return
+        messagesRef.current = loaded
+        messagesSessionIdRef.current = activeId
+        setMessages(loaded)
+      }
+      applyStoredDraft(activeId)
       loadedRef.current = true
       setIsLoadingMessages(false)
     })()
-  }, [activeId, flushMessages])
+  }, [activeId, applyStoredDraft, flushMessages])
 
   useEffect(
     () => () => {
@@ -310,13 +386,25 @@ export function usePlaygroundState() {
       if (!meta) return
       void flushMessages()
       persistDrafts()
+      stashOutgoingMessages()
+      const buffered = backgroundMessagesRef.current.get(sessionId)
+      if (buffered) {
+        backgroundMessagesRef.current.delete(sessionId)
+        messagesRef.current = buffered
+        messagesSessionIdRef.current = sessionId
+        setMessages(buffered)
+        loadedRef.current = true
+        setIsLoadingMessages(false)
+      } else {
+        messagesSessionIdRef.current = null
+      }
       commitIndex({ ...current, activeId: sessionId })
       configRef.current = meta.config
       setConfig(meta.config)
       parameterEnabledRef.current = meta.parameterEnabled
       setParameterEnabled(meta.parameterEnabled)
     },
-    [commitIndex, flushMessages, persistDrafts]
+    [commitIndex, flushMessages, persistDrafts, stashOutgoingMessages]
   )
 
   const createSession = useCallback((): boolean => {
@@ -332,13 +420,15 @@ export function usePlaygroundState() {
     }
     void flushMessages()
     persistDrafts()
+    stashOutgoingMessages()
+    messagesSessionIdRef.current = null
     const meta = createSessionMeta(
       configRef.current,
       parameterEnabledRef.current
     )
     commitIndex({ activeId: meta.id, sessions: [meta, ...current.sessions] })
     return true
-  }, [commitIndex, flushMessages, persistDrafts])
+  }, [commitIndex, flushMessages, persistDrafts, stashOutgoingMessages])
 
   const renameSession = useCallback(
     (sessionId: string, title: string) => {
@@ -386,6 +476,16 @@ export function usePlaygroundState() {
         parameterEnabledRef.current = nextMeta.parameterEnabled
         setParameterEnabled(nextMeta.parameterEnabled)
       }
+      const pendingTimer = saveTimersRef.current.get(sessionId)
+      if (pendingTimer !== undefined) {
+        window.clearTimeout(pendingTimer)
+        saveTimersRef.current.delete(sessionId)
+      }
+      savePendingRef.current.delete(sessionId)
+      backgroundMessagesRef.current.delete(sessionId)
+      if (messagesSessionIdRef.current === sessionId) {
+        messagesSessionIdRef.current = null
+      }
       const drafts = { ...draftsRef.current }
       delete drafts[sessionId]
       draftsRef.current = drafts
@@ -428,6 +528,7 @@ export function usePlaygroundState() {
     updateConfig,
     updateParameterEnabled,
     updateMessages,
+    updateSessionMessages,
     updateDraft,
     selectSession,
     createSession,

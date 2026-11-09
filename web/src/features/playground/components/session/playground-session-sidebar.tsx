@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import {
+  Loader2Icon,
   MessageSquareIcon,
   MoreHorizontalIcon,
   PanelLeftCloseIcon,
@@ -52,7 +53,7 @@ type PlaygroundSessionSidebarProps = {
   activeId: string | null
   collapsed: boolean
   embedded?: boolean
-  disabled?: boolean
+  runningSessionIds?: ReadonlySet<string>
   onToggle: () => void
   onCreate: () => void
   onSelect: (sessionId: string) => void
@@ -106,7 +107,6 @@ export function PlaygroundSessionSidebar(props: PlaygroundSessionSidebarProps) {
   }, [props.sessions, query])
 
   const startEdit = (session: SessionMeta) => {
-    if (props.disabled) return
     setEditingId(session.id)
     setEditingTitle(session.title || t('New chat'))
   }
@@ -119,7 +119,7 @@ export function PlaygroundSessionSidebar(props: PlaygroundSessionSidebarProps) {
   }
 
   const handleSelect = (sessionId: string) => {
-    if (props.disabled || editingId) return
+    if (editingId) return
     props.onSelect(sessionId)
   }
 
@@ -135,7 +135,6 @@ export function PlaygroundSessionSidebar(props: PlaygroundSessionSidebarProps) {
               <Button
                 aria-label={t('New conversation')}
                 className='text-muted-foreground hover:text-foreground'
-                disabled={props.disabled}
                 onClick={props.onCreate}
                 size='icon-sm'
                 variant='ghost'
@@ -233,7 +232,6 @@ export function PlaygroundSessionSidebar(props: PlaygroundSessionSidebarProps) {
       <div className='px-3 py-2'>
         <Button
           className='w-full justify-center'
-          disabled={props.disabled}
           onClick={props.onCreate}
           size='sm'
         >
@@ -256,16 +254,13 @@ export function PlaygroundSessionSidebar(props: PlaygroundSessionSidebarProps) {
             {group.sessions.map((session) => {
               const active = session.id === props.activeId
               const editing = editingId === session.id
+              const running = props.runningSessionIds?.has(session.id) ?? false
               return (
                 <div
                   aria-current={active ? 'true' : undefined}
-                  aria-disabled={props.disabled || undefined}
                   className={cn(
-                    'group flex items-center gap-1 rounded-md px-2 py-1.5 text-sm',
-                    active ? 'bg-primary/10 text-primary' : 'hover:bg-muted/70',
-                    props.disabled
-                      ? 'cursor-default opacity-70'
-                      : 'cursor-pointer'
+                    'group flex cursor-pointer items-center gap-1 rounded-md px-2 py-1.5 text-sm',
+                    active ? 'bg-primary/10 text-primary' : 'hover:bg-muted/70'
                   )}
                   key={session.id}
                   onClick={() => handleSelect(session.id)}
@@ -276,7 +271,7 @@ export function PlaygroundSessionSidebar(props: PlaygroundSessionSidebarProps) {
                     }
                   }}
                   role='button'
-                  tabIndex={props.disabled ? -1 : 0}
+                  tabIndex={0}
                 >
                   {editing ? (
                     <Input
@@ -307,6 +302,12 @@ export function PlaygroundSessionSidebar(props: PlaygroundSessionSidebarProps) {
                       {session.title || t('New chat')}
                     </span>
                   )}
+                  {running && (
+                    <Loader2Icon
+                      aria-label={t('Generating...')}
+                      className='text-primary size-3.5 shrink-0 animate-spin'
+                    />
+                  )}
                   {!editing && (
                     <DropdownMenu>
                       <DropdownMenuTrigger
@@ -314,7 +315,6 @@ export function PlaygroundSessionSidebar(props: PlaygroundSessionSidebarProps) {
                           <Button
                             aria-label={t('Actions')}
                             className='text-muted-foreground hover:text-foreground size-6 shrink-0 opacity-0 group-hover:opacity-100 data-[popup-open]:opacity-100'
-                            disabled={props.disabled}
                             onClick={(event) => event.stopPropagation()}
                             size='icon-sm'
                             variant='ghost'

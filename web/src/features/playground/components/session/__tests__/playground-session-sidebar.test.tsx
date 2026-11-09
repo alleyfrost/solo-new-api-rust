@@ -35,6 +35,7 @@ const LABELS = [
   'Delete conversation',
   'Earlier',
   'Expand sidebar',
+  'Generating...',
   'New chat',
   'New conversation',
   'Rename',
@@ -68,7 +69,6 @@ function renderSidebar(
     sessions: [],
     activeId: null,
     collapsed: false,
-    disabled: false,
     onToggle: vi.fn(),
     onCreate: vi.fn(),
     onSelect: vi.fn(),
@@ -98,7 +98,7 @@ test('groups conversations by day and highlights the active one', () => {
   ).toHaveAttribute('aria-current', 'true')
 })
 
-test('selects a conversation unless generation is running', async () => {
+test('selects a conversation', async () => {
   const user = userEvent.setup()
   const { props } = renderSidebar({
     sessions: [session('A', Date.now(), 'a')],
@@ -108,15 +108,21 @@ test('selects a conversation unless generation is running', async () => {
   expect(props.onSelect).toHaveBeenCalledWith('a')
 })
 
-test('disables switching while generating', async () => {
+test('marks a generating conversation and still allows switching away', async () => {
   const user = userEvent.setup()
   const { props } = renderSidebar({
-    sessions: [session('A', Date.now(), 'a')],
-    disabled: true,
+    sessions: [
+      session('运行中', Date.now(), 'a'),
+      session('空闲', Date.now(), 'b'),
+    ],
+    activeId: 'a',
+    runningSessionIds: new Set(['a']),
   })
 
-  await user.click(screen.getByText('A'))
-  expect(props.onSelect).not.toHaveBeenCalled()
+  expect(screen.getByLabelText('Generating...')).toBeInTheDocument()
+
+  await user.click(screen.getByText('空闲'))
+  expect(props.onSelect).toHaveBeenCalledWith('b')
 })
 
 test('renames a conversation inline', async () => {

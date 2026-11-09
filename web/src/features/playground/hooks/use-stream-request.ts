@@ -16,7 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useCallback, useEffect, useRef, useState } from 'react'
 import { SSE } from 'sse.js'
 
 import { getFreshAuthHeaders } from '@/lib/api'
@@ -181,55 +180,22 @@ export function createStreamRequestController(
 }
 
 /**
- * Hook for handling streaming chat completion requests
+ * One independent SSE stream, so concurrent conversations never cancel each
+ * other; the caller owns its lifecycle and calls dispose() when done.
  */
-export function useStreamRequest() {
-  const [isStreaming, setIsStreaming] = useState(false)
-  const controllerRef = useRef<ReturnType<
-    typeof createStreamRequestController
-  > | null>(null)
-  if (!controllerRef.current) {
-    controllerRef.current = createStreamRequestController({
-      getHeaders: getFreshAuthHeaders,
-      createSource: (payload, headers) =>
-        new SSE(API_ENDPOINTS.CHAT_COMPLETIONS, {
-          headers,
-          method: 'POST',
-          payload: JSON.stringify(payload),
-        }) as StreamEventSource,
-      setStreaming: setIsStreaming,
-    })
-  }
-
-  const sendStreamRequest = useCallback(
-    (
-      payload: ChatCompletionRequest,
-      onUpdate: (type: 'reasoning' | 'content', chunk: string) => void,
-      onComplete: () => void,
-      onError: (error: string, errorCode?: string) => void
-    ) =>
-      controllerRef.current?.send(payload, {
-        onUpdate,
-        onComplete,
-        onError,
-      }),
-    []
-  )
-
-  const stopStream = useCallback(() => {
-    controllerRef.current?.stop()
-  }, [])
-
-  useEffect(
-    () => () => {
-      controllerRef.current?.dispose()
-    },
-    []
-  )
-
-  return {
-    sendStreamRequest,
-    stopStream,
-    isStreaming,
-  }
+export function createPlaygroundStreamRequest(
+  options: {
+    onStreamingChange?: (streaming: boolean) => void
+  } = {}
+) {
+  return createStreamRequestController({
+    getHeaders: getFreshAuthHeaders,
+    createSource: (payload, headers) =>
+      new SSE(API_ENDPOINTS.CHAT_COMPLETIONS, {
+        headers,
+        method: 'POST',
+        payload: JSON.stringify(payload),
+      }) as StreamEventSource,
+    setStreaming: options.onStreamingChange ?? (() => undefined),
+  })
 }
