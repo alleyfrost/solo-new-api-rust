@@ -250,6 +250,48 @@ async fn chat_on_image_model_translates_to_images_and_wraps_the_reply() {
 }
 
 #[tokio::test]
+async fn chat_with_a_reference_image_uses_the_edits_endpoint() {
+    let server = MockServer::start().await;
+    let reference = "data:image/png;base64,QUJD";
+    Mock::given(method("POST"))
+        .and(path("/v1/images/edits"))
+        .and(body_partial_json(json!({
+            "model": IMAGE_MODEL,
+            "prompt": "把背景换成雪山",
+            "n": 1,
+            "images": [{"image_url": reference}]
+        })))
+        .respond_with(image_ok())
+        .mount(&server)
+        .await;
+
+    let fixture = setup(&server.uri()).await;
+    let (status, body, _, _) = send(
+        fixture,
+        json!({
+            "model": IMAGE_MODEL,
+            "messages": [{"role": "user", "content": [
+                {"type": "text", "text": "把背景换成雪山"},
+                {"type": "image_url", "image_url": {"url": reference}}
+            ]}]
+        }),
+    )
+    .await;
+    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
+    assert!(
+        String::from_utf8_lossy(&body).contains("![image](data:image/png;base64,QUJD)"),
+        "{}",
+        String::from_utf8_lossy(&body)
+    );
+
+    let reqs = server.received_requests().await.unwrap();
+    assert_eq!(reqs.len(), 1);
+    let sent: Value = serde_json::from_slice(&reqs[0].body).unwrap();
+    assert_eq!(sent["images"], json!([{"image_url": reference}]));
+    assert_eq!(sent["n"], 1);
+}
+
+#[tokio::test]
 async fn streaming_image_model_returns_one_sse_block() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))

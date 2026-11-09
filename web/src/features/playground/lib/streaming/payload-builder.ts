@@ -22,6 +22,7 @@ import type {
   PlaygroundConfig,
   ParameterEnabled,
 } from '../../types'
+import { MESSAGE_ROLES } from '../../constants'
 import { formatMessageForAPI, isValidMessage } from '../message/message-utils'
 
 /**
@@ -33,9 +34,15 @@ export function buildChatCompletionPayload(
   parameterEnabled: ParameterEnabled
 ): ChatCompletionRequest {
   // Filter and format valid messages
-  const processedMessages = messages
-    .filter(isValidMessage)
-    .map(formatMessageForAPI)
+  const validMessages = messages.filter(isValidMessage)
+  const latestUserIndex = validMessages.reduce(
+    (latest, message, index) =>
+      message.from === MESSAGE_ROLES.USER ? index : latest,
+    -1
+  )
+  const processedMessages = validMessages.map((message, index) =>
+    formatMessageForAPI(message, { includeImages: index === latestUserIndex })
+  )
 
   const payload: ChatCompletionRequest = {
     model: config.model,

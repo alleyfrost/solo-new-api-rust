@@ -24,6 +24,7 @@ import { toast } from 'sonner'
 import {
   PromptInputButton,
   PromptInputTools,
+  usePromptInputAttachments,
 } from '@/components/ai-elements/prompt-input'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import {
@@ -73,8 +74,13 @@ export function PlaygroundInputTools({
 }: PlaygroundInputToolsProps) {
   const { t } = useTranslation()
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
+  const attachments = usePromptInputAttachments()
 
   const handleFileAction = (action: string) => {
+    if (action === 'upload-photo') {
+      attachments.openFileDialog()
+      return
+    }
     const notice = getAttachmentActionNotice(action)
     toast.info(t(notice.title), {
       description: notice.description,

@@ -14,13 +14,15 @@ use crate::state::AppState;
 /// 桥接要把图片塞进 chat 响应里，只能整包读取；超过上限直接报错，避免大图顶内存。
 const MAX_IMAGE_BYTES: usize = 32 * 1024 * 1024;
 /// 允许从 chat 请求透传给生图接口的可选字段（尺寸、张数、水印等）。
-const PASSTHROUGH_FIELDS: [&str; 6] = [
+const PASSTHROUGH_FIELDS: [&str; 8] = [
     "size",
     "n",
     "watermark",
     "response_format",
     "quality",
     "style",
+    "output_format",
+    "prompt_extend",
 ];
 
 fn now() -> i64 {
@@ -53,6 +55,39 @@ fn prompt_of(payload: &Value) -> Option<String> {
         }
     }
     None
+}
+
+/// 取最后一条 user 消息里的参考图；只放行公网 URL 与 data:image 前缀，
+/// 纯 base64 字符串上游会直接拒绝。
+fn images_of(payload: &Value) -> Vec<String> {
+    let Some(messages) = payload.get("messages").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let Some(user) = messages
+        .iter()
+        .rev()
+        .find(|message| message.get("role").and_then(Value::as_str) == Some("user"))
+    else {
+        return Vec::new();
+    };
+    let Some(parts) = user.get("content").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    parts
+        .iter()
+        .filter(|part| part.get("type").and_then(Value::as_str) == Some("image_url"))
+        .filter_map(|part| {
+            let image = part.get("image_url")?;
+            let url = image
+                .as_str()
+                .or_else(|| image.get("url").and_then(Value::as_str))?
+                .trim();
+            let supported = url.starts_with("data:image/")
+                || url.starts_with("http://")
+                || url.starts_with("https://");
+            supported.then(|| url.to_string())
+        })
+        .collect()
 }
 
 fn mime_of(format: &str) -> &'static str {
@@ -94,8 +129,9 @@ fn json_body(status: StatusCode, value: Value) -> Response {
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
 
-/// 调用方用 chat 接口请求一个生图模型时，转成 `/v1/images/generations`，
-/// 再把图片包成一条 chat completion 返回（流式请求退化为单块）。
+/// 调用方用 chat 接口请求一个生图模型时，带参考图转成 `/v1/images/edits`、
+/// 否则转成 `/v1/images/generations`，再把图片包成一条 chat completion 返回
+/// （流式请求退化为单块）。
 pub async fn relay(
     state: AppState,
     ctx: TokenContext,
@@ -111,6 +147,7 @@ pub async fn relay(
             "invalid_request_error",
         );
     };
+    let reference_images = images_of(payload);
     let mut images = Map::new();
     images.insert("model".to_string(), json!(origin_model));
     images.insert("prompt".to_string(), json!(prompt));
@@ -119,6 +156,22 @@ pub async fn relay(
             images.insert(key.to_string(), value.clone());
         }
     }
+    let endpoint = if reference_images.is_empty() {
+        "/v1/images/generations"
+    } else {
+        images.insert(
+            "images".to_string(),
+            Value::Array(
+                reference_images
+                    .iter()
+                    .map(|url| json!({ "image_url": url }))
+                    .collect(),
+            ),
+        );
+        // 编辑接口只支持单张输出，n>1 会被上游拒绝。
+        images.insert("n".to_string(), json!(1));
+        "/v1/images/edits"
+    };
     let Ok(body) = serde_json::to_vec(&Value::Object(images)) else {
         return openai_error(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -127,14 +180,7 @@ pub async fn relay(
         );
     };
 
-    let upstream = passthrough::relay(
-        state,
-        ctx,
-        headers,
-        Bytes::from(body),
-        "/v1/images/generations",
-    )
-    .await;
+    let upstream = passthrough::relay(state, ctx, headers, Bytes::from(body), endpoint).await;
     if !upstream.status().is_success() {
         // 上游错误原样返回，保持调用方看到的报错文本与直连一致。
         return upstream;
@@ -256,6 +302,32 @@ mod tests {
             prompt_of(&json!({"messages": [{"role": "user", "content": "  "}]})),
             None
         );
+    }
+
+    #[test]
+    fn images_come_from_the_last_user_message_and_require_a_supported_url() {
+        let payload = json!({
+            "messages": [
+                {"role": "user", "content": [
+                    {"type": "image_url", "image_url": {"url": "https://old/x.png"}}
+                ]},
+                {"role": "assistant", "content": "ok"},
+                {"role": "user", "content": [
+                    {"type": "text", "text": "把背景换成雪山"},
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,QUJD"}},
+                    {"type": "image_url", "image_url": "http://ref/y.jpg"},
+                    {"type": "image_url", "image_url": {"url": "QUJD"}}
+                ]}
+            ]
+        });
+        assert_eq!(
+            images_of(&payload),
+            vec![
+                "data:image/png;base64,QUJD".to_string(),
+                "http://ref/y.jpg".to_string()
+            ]
+        );
+        assert!(images_of(&json!({"messages": [{"role": "user", "content": "hi"}]})).is_empty());
     }
 
     #[test]

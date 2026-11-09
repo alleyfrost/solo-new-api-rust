@@ -34,6 +34,8 @@ const DATA_IMAGE_PATTERN = /!\[([^\]]*)\]\((data:image\/[^)\s]+)\)/g
 const MARKER_PATTERN = /\[\[image-omitted\]\]/g
 const SEGMENT_PATTERN =
   /\[\[image-omitted\]\]|!\[([^\]]*)\]\((data:image\/[^)\s]+)\)/g
+const INLINE_IMAGE_PATTERN =
+  /!\[[^\]]*\]\(((?:data:image\/|https?:\/\/)[^)\s]+)\)/g
 
 function pushText(segments: MessageImageSegment[], text: string) {
   if (text) {
@@ -79,6 +81,26 @@ export function splitMessageImages(content: string): MessageImageSegment[] {
 
   pushPendingTail(segments, content.slice(cursor))
   return segments
+}
+
+/** Images the user attached or referenced in a message, in display order. */
+export function extractInlineImageUrls(content: string): string[] {
+  INLINE_IMAGE_PATTERN.lastIndex = 0
+  const urls: string[] = []
+  let match: RegExpExecArray | null
+  while ((match = INLINE_IMAGE_PATTERN.exec(content)) !== null) {
+    urls.push(match[1])
+  }
+  return urls
+}
+
+/** Drop inline image markdown while keeping the surrounding instruction text. */
+export function removeInlineImages(content: string): string {
+  INLINE_IMAGE_PATTERN.lastIndex = 0
+  return content
+    .replaceAll(INLINE_IMAGE_PATTERN, '')
+    .replaceAll(/\n{3,}/g, '\n\n')
+    .trim()
 }
 
 export function stripMessageImagesForStorage(content: string): string {

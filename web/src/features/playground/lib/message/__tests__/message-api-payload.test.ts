@@ -38,3 +38,41 @@ test('history sent upstream carries the image marker instead of the payload', ()
 
   expect(payload.content).toBe(`生成完成\n\n${OMITTED_IMAGE_MARKER}`)
 })
+
+test('the latest user message sends its image as a content part', () => {
+  const dataUrl = `data:image/png;base64,${'A'.repeat(64)}`
+  const message: Message = {
+    key: 'edit-request',
+    from: 'user',
+    versions: [
+      {
+        id: 'edit-version',
+        content: `把背景换成雪山\n\n![photo.png](${dataUrl})`,
+      },
+    ],
+  }
+
+  const payload = formatMessageForAPI(message, { includeImages: true })
+
+  expect(payload.content).toEqual([
+    { type: 'text', text: '把背景换成雪山' },
+    { type: 'image_url', image_url: { url: dataUrl } },
+  ])
+})
+
+test('an earlier user message keeps the image marker even when asked to include images', () => {
+  const message: Message = {
+    key: 'old-request',
+    from: 'assistant',
+    versions: [
+      {
+        id: 'old-version',
+        content: `旧回复\n\n![image](data:image/png;base64,QUJD)`,
+      },
+    ],
+  }
+
+  const payload = formatMessageForAPI(message, { includeImages: true })
+
+  expect(payload.content).toBe(`旧回复\n\n${OMITTED_IMAGE_MARKER}`)
+})

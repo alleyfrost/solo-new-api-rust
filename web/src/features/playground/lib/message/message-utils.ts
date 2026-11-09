@@ -25,7 +25,11 @@ import type {
   ChatCompletionMessage,
   ContentPart,
 } from '../../types'
-import { stripMessageImagesForStorage } from './message-images'
+import {
+  extractInlineImageUrls,
+  removeInlineImages,
+  stripMessageImagesForStorage,
+} from './message-images'
 
 /**
  * Create a new message version
@@ -153,11 +157,29 @@ export function getTextContent(content: string | ContentPart[]): string {
 /**
  * Format message for API request
  *
- * Inline image payloads stay in the conversation for display only; sending
- * megabytes of base64 back upstream buys nothing, so they travel as a marker.
+ * Only the latest user message keeps its images as content parts: that is the
+ * reference image an edit request needs. Everything older travels as a marker,
+ * because replaying megabytes of base64 on every turn buys nothing.
  */
-export function formatMessageForAPI(message: Message): ChatCompletionMessage {
+export function formatMessageForAPI(
+  message: Message,
+  options?: { includeImages?: boolean }
+): ChatCompletionMessage {
   const currentVersion = getCurrentVersion(message)
+  if (options?.includeImages && message.from === MESSAGE_ROLES.USER) {
+    const imageUrls = extractInlineImageUrls(currentVersion.content)
+    if (imageUrls.length > 0) {
+      const parts: ContentPart[] = []
+      const text = removeInlineImages(currentVersion.content)
+      if (text) {
+        parts.push({ type: 'text', text })
+      }
+      for (const url of imageUrls) {
+        parts.push({ type: 'image_url', image_url: { url } })
+      }
+      return { role: message.from, content: parts }
+    }
+  }
   return {
     role: message.from,
     content: stripMessageImagesForStorage(currentVersion.content),

@@ -18,15 +18,24 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 
 import {
   PromptInput,
+  PromptInputAttachment,
+  PromptInputAttachments,
   PromptInputFooter,
+  PromptInputHeader,
   PromptInputTextarea,
   type PromptInputMessage,
 } from '@/components/ai-elements/prompt-input'
 
-import { getSubmittableInputText } from '../../lib'
+import {
+  appendImageAttachments,
+  getSubmittableInputText,
+  MAX_IMAGE_ATTACHMENT_BYTES,
+  MAX_IMAGE_ATTACHMENTS,
+} from '../../lib'
 import type {
   ModelOption,
   GroupOption,
@@ -88,17 +97,28 @@ export function PlaygroundInput({
     const submittableText = getSubmittableInputText(message, disabled)
 
     if (!submittableText) return
-    onSubmit(submittableText)
+    onSubmit(appendImageAttachments(submittableText, message.files))
     setText('')
   }
 
   return (
     <div className='grid shrink-0 gap-4 px-1 md:pb-4'>
       <PromptInput
+        accept='image/*'
         className='relative'
         groupClassName='bg-background/95 dark:bg-background/80 border-border/70 shadow-[0_18px_60px_-32px_rgba(0,0,0,0.65)] ring-1 ring-foreground/5 rounded-xl overflow-hidden transition-all duration-200 focus-within:border-primary/45 focus-within:ring-primary/15 focus-within:shadow-[0_22px_70px_-34px_rgba(0,0,0,0.75)]'
+        maxFiles={MAX_IMAGE_ATTACHMENTS}
+        maxFileSize={MAX_IMAGE_ATTACHMENT_BYTES}
+        multiple
         onSubmit={handleSubmit}
+        onError={(error) => toast.error(error.message)}
       >
+        <PromptInputHeader>
+          <PromptInputAttachments>
+            {(file) => <PromptInputAttachment data={file} />}
+          </PromptInputAttachments>
+        </PromptInputHeader>
+
         <PromptInputTextarea
           autoComplete='off'
           autoCorrect='off'

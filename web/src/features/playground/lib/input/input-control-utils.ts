@@ -16,7 +16,30 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type { FileUIPart } from 'ai'
+
 import type { GroupOption, ModelOption } from '../../types'
+
+export const MAX_IMAGE_ATTACHMENTS = 2
+export const MAX_IMAGE_ATTACHMENT_BYTES = 8 * 1024 * 1024
+
+/** Turn attached images into inline markdown so they live in the message body. */
+export function appendImageAttachments(
+  text: string,
+  files: Array<Pick<FileUIPart, 'url' | 'mediaType' | 'filename'>> = []
+): string {
+  const images = files.filter(
+    (file) => file.url && file.mediaType?.startsWith('image/')
+  )
+  if (images.length === 0) {
+    return text
+  }
+
+  const markdown = images
+    .map((file) => `![${file.filename || 'image'}](${file.url})`)
+    .join('\n')
+  return `${text}\n\n${markdown}`
+}
 
 type InputControlStateOptions = {
   disabled?: boolean
