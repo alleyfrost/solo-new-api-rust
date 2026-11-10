@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import type { TFunction } from 'i18next'
 import { describe, expect, test } from 'vitest'
 
+import type { ApiKey } from '../../types'
 import {
   customKeyErrorMessage,
   getApiKeyFormDefaultValues,
@@ -26,8 +27,8 @@ import {
   normalizeCustomKey,
   transformApiKeyToFormDefaults,
   transformFormDataToPayload,
+  type ApiKeyFormValues,
 } from '../api-key-form'
-import type { ApiKeyFormValues } from '../api-key-form'
 
 const t = ((key: string) => key) as TFunction
 const schema = getApiKeyFormSchema(t)
@@ -148,9 +149,93 @@ describe('custom key payload', () => {
       model_limits: '',
       allow_ips: '',
       allow_user_quota_query: true,
+      rpm: 0,
+      concurrency: 0,
     })
 
     expect(defaults.key).toBe('')
     expect('key' in transformFormDataToPayload(defaults)).toBe(false)
+  })
+})
+
+describe('per-token rate limits', () => {
+  test('defaults to unlimited (0) and always submits both fields', () => {
+    const payload = transformFormDataToPayload(formValues())
+    expect(payload.rpm).toBe(0)
+    expect(payload.concurrency).toBe(0)
+  })
+
+  test('submits configured rpm and concurrency', () => {
+    const payload = transformFormDataToPayload(
+      formValues({ rpm: 60, concurrency: 2 })
+    )
+    expect(payload.rpm).toBe(60)
+    expect(payload.concurrency).toBe(2)
+  })
+
+  test('rejects negative values with the backend wording', () => {
+    expect(keyIssues({ rpm: -1 })).toContain('Rate limits must not be negative')
+    expect(keyIssues({ concurrency: -5 })).toContain(
+      'Rate limits must not be negative'
+    )
+    expect(keyIssues({ rpm: 0, concurrency: 0 })).toHaveLength(0)
+  })
+
+  test('backfills stored limits when editing', () => {
+    const defaults = transformApiKeyToFormDefaults({
+      id: 1,
+      name: 'cli',
+      key: VALID_KEY,
+      status: 1,
+      remain_quota: 0,
+      used_quota: 0,
+      request_count: 0,
+      used_tokens: 0,
+      cache_read_tokens: 0,
+      unlimited_quota: true,
+      expired_time: -1,
+      created_time: 1,
+      accessed_time: 0,
+      group: 'default',
+      auto_groups: null,
+      cross_group_retry: false,
+      model_limits_enabled: false,
+      model_limits: '',
+      allow_ips: '',
+      allow_user_quota_query: true,
+      rpm: 30,
+      concurrency: 1,
+    })
+    expect(defaults.rpm).toBe(30)
+    expect(defaults.concurrency).toBe(1)
+  })
+
+  test('falls back to unlimited when the api omits the fields', () => {
+    // 模拟旧版后端响应不携带限流字段
+    const legacy = {
+      id: 1,
+      name: 'cli',
+      key: VALID_KEY,
+      status: 1,
+      remain_quota: 0,
+      used_quota: 0,
+      request_count: 0,
+      used_tokens: 0,
+      cache_read_tokens: 0,
+      unlimited_quota: true,
+      expired_time: -1,
+      created_time: 1,
+      accessed_time: 0,
+      group: 'default',
+      auto_groups: null,
+      cross_group_retry: false,
+      model_limits_enabled: false,
+      model_limits: '',
+      allow_ips: '',
+      allow_user_quota_query: true,
+    } as unknown as ApiKey
+    const defaults = transformApiKeyToFormDefaults(legacy)
+    expect(defaults.rpm).toBe(0)
+    expect(defaults.concurrency).toBe(0)
   })
 })

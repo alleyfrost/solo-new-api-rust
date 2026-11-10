@@ -71,6 +71,16 @@ export function getApiKeyFormSchema(t: TFunction, maxAutoGroups = 5) {
       auto_groups: z.array(z.string()),
       cross_group_retry: z.boolean().optional(),
       tokenCount: z.number().min(1).optional(),
+      rpm: z
+        .number()
+        .int()
+        .min(0, t('Rate limits must not be negative'))
+        .optional(),
+      concurrency: z
+        .number()
+        .int()
+        .min(0, t('Rate limits must not be negative'))
+        .optional(),
     })
     .superRefine((data, ctx) => {
       const keyError = customKeyErrorMessage(data.key)
@@ -140,6 +150,8 @@ export const API_KEY_FORM_DEFAULT_VALUES: ApiKeyFormValues = {
   auto_groups: [],
   cross_group_retry: true,
   tokenCount: 1,
+  rpm: 0,
+  concurrency: 0,
 }
 
 export function getApiKeyFormDefaultValues(
@@ -182,6 +194,9 @@ export function transformFormDataToPayload(
         ? data.auto_groups
         : [],
     cross_group_retry: data.group === 'auto' ? !!data.cross_group_retry : false,
+    // 限流配置始终随表单提交：0 表示不限；更新分支显式 0 即清除配置。
+    rpm: data.rpm ?? 0,
+    concurrency: data.concurrency ?? 0,
   }
 }
 
@@ -215,5 +230,7 @@ export function transformApiKeyToFormDefaults(
     auto_groups: autoGroups,
     cross_group_retry: !!apiKey.cross_group_retry,
     tokenCount: 1,
+    rpm: apiKey.rpm ?? 0,
+    concurrency: apiKey.concurrency ?? 0,
   }
 }

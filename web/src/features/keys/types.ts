@@ -50,6 +50,8 @@ export const apiKeySchema = z.object({
   model_limits: z.string().nullish().default(''),
   allow_ips: z.string().nullish().default(''),
   allow_user_quota_query: z.boolean().optional().default(false),
+  rpm: z.number().default(0),
+  concurrency: z.number().default(0),
 })
 
 export type ApiKey = z.infer<typeof apiKeySchema>
@@ -100,6 +102,9 @@ export interface ApiKeyFormData {
   group: string
   auto_groups: string[]
   cross_group_retry: boolean
+  /** 0 = 不限；更新时显式 0 清除配置 */
+  rpm: number
+  concurrency: number
 }
 
 export interface TokenAutoGroupsConfig {

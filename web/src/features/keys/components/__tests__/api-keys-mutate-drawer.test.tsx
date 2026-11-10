@@ -295,9 +295,9 @@ describe('API key expiry across editing sessions', () => {
         status: 1,
         remain_quota: 0,
         used_quota: 0,
-    request_count: 0,
-    used_tokens: 0,
-    cache_read_tokens: 0,
+        request_count: 0,
+        used_tokens: 0,
+        cache_read_tokens: 0,
         unlimited_quota: true,
         expired_time: 2000000000,
         created_time: 1,
@@ -309,6 +309,8 @@ describe('API key expiry across editing sessions', () => {
         model_limits: '',
         allow_ips: '',
         allow_user_quota_query: true,
+        rpm: 0,
+        concurrency: 0,
       }
       const second = { ...first, id: 2, name: 'non-expiring', expired_time: -1 }
       let resolveDetail!: (value: { data: unknown }) => void
@@ -432,6 +434,8 @@ describe('custom key on create only', () => {
     model_limits: '',
     allow_ips: '',
     allow_user_quota_query: true,
+    rpm: 0,
+    concurrency: 0,
   }
 
   async function renderUpdateDrawer(): Promise<() => unknown[]> {
