@@ -140,3 +140,33 @@ describe.each(cases)('dashboard $granularity chart chronology', (scenario) => {
     }
   })
 })
+
+describe('dashboard hour chart with full hourly buckets', () => {
+  test('keeps every hourly bucket on the axis instead of one padded point', () => {
+    // A full-day range returns 24 hourly buckets; all of them must survive on
+    // the axis (this was the bug: a single day-bucket was padded to 7 points
+    // with value only on the last tick).
+    const start = new Date(2026, 0, 3, 0).getTime() / 1000
+    const data: QuotaDataItem[] = Array.from({ length: 24 }, (_, i) => ({
+      created_at: start + i * 3600,
+      model_name: 'model-a',
+      username: 'root',
+      token_used: i + 1,
+      count: i + 1,
+    }))
+    const result = processChartData(data, 'hour')
+
+    for (const key of ['spec_line', 'spec_area', 'spec_model_line'] as const) {
+      const values: Array<{ Time: string; rawTokens: number; Count: number }> =
+        result[key].data[0].values
+      expect(values).toHaveLength(24)
+      expect(new Set(values.map((row) => row.Time)).size).toBe(24)
+      expect(values[0].Time).toBe('01-03 00:00')
+      expect(values[23].Time).toBe('01-03 23:00')
+      const tokens = values.map((row) =>
+        key === 'spec_model_line' ? row.Count : row.rawTokens
+      )
+      expect(tokens).toEqual(Array.from({ length: 24 }, (_, i) => i + 1))
+    }
+  })
+})

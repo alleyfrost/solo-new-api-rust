@@ -35,6 +35,15 @@ fn range(query: &DataQuery) -> (i64, i64) {
     (start, end)
 }
 
+/// 聚合桶大小：`default_time=hour` 时按小时分组（quota_data 本就以小时桶落库，
+/// 图表在小时粒度才能看到时间轴变化）；其余取值与缺省保持按天分组，行为不变。
+fn bucket_divisor(default_time: Option<&str>) -> i64 {
+    match default_time {
+        Some("hour") => 3600,
+        _ => 86400,
+    }
+}
+
 async fn grouped(
     state: &AppState,
     query: &DataQuery,
@@ -45,9 +54,10 @@ async fn grouped(
     let user_filter = user_id.unwrap_or(0);
     let username = query.username.clone().unwrap_or_default();
     let token_filter = query.token_id.unwrap_or(0);
+    let divisor = bucket_divisor(query.default_time.as_deref());
     // 聚合表命中就直接返回；缺失/为空时回退到 logs（兼容旧库与首轮回填前）。
-    let mut quota_sql = String::from(
-        "SELECT created_at/86400*86400 AS day, COALESCE(model_name,'') AS model_name, COALESCE(username,'') AS username, \
+    let mut quota_sql = format!(
+        "SELECT created_at/{divisor}*{divisor} AS day, COALESCE(model_name,'') AS model_name, COALESCE(username,'') AS username, \
          COALESCE(SUM(token_used),0) AS token_used, COALESCE(SUM(cache_read_tokens),0) AS cache_read_tokens, \
          COALESCE(SUM(cache_creation_tokens),0) AS cache_creation_tokens, COALESCE(SUM(count),0) AS count, \
          COALESCE(SUM(quota),0) AS quota FROM quota_data \
@@ -89,8 +99,8 @@ async fn grouped(
             .collect();
         return Ok(json_ok(&json!(items)));
     }
-    let mut sql = String::from(
-        "SELECT created_at/86400*86400 AS day, COALESCE(model_name,'') AS model_name, COALESCE(username,'') AS username, \
+    let mut sql = format!(
+        "SELECT created_at/{divisor}*{divisor} AS day, COALESCE(model_name,'') AS model_name, COALESCE(username,'') AS username, \
          COALESCE(SUM(prompt_tokens),0)+COALESCE(SUM(completion_tokens),0) AS token_used, \
          COALESCE(SUM(CASE WHEN json_valid(other) THEN json_extract(other,'$.cache_tokens') END),0) AS cache_read_tokens, \
          COALESCE(SUM(CASE WHEN json_valid(other) THEN json_extract(other,'$.cache_creation_tokens') END),0) AS cache_creation_tokens, \
