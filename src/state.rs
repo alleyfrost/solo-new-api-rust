@@ -59,6 +59,7 @@ pub struct AppState {
     /// 正在导出日志的用户；同一用户同时只允许一个导出。
     pub export_slots: Arc<Mutex<HashSet<i64>>>,
     pub body_gate: Arc<crate::mem::BodyGate>,
+    pub rate_limits: Arc<crate::ratelimit::RateLimitRegistry>,
 }
 
 impl AppState {
@@ -83,6 +84,7 @@ impl AppState {
                 settings.body_gate_big,
                 settings.body_gate_huge,
             )),
+            rate_limits: Arc::new(crate::ratelimit::RateLimitRegistry::default()),
         }
     }
 

@@ -36,6 +36,9 @@ pub struct TokenInput {
     pub auto_groups: Option<Vec<String>>,
     pub cross_group_retry: Option<bool>,
     pub status: Option<i64>,
+    /// 每-token 限流：RPM（每分钟请求数）与并发上限，0 = 不限。
+    pub rpm: Option<i64>,
+    pub concurrency: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -115,12 +118,21 @@ fn token_json_with_usage(
     token: &TokenRow,
     full_key: bool,
     usage: Option<&TokenUsage>,
+    limits: Option<(i64, i64)>,
 ) -> Value {
-    let mut value = token_json(token, full_key);
+    let mut value = token_json_with_limits(token, full_key, limits);
     let (requests, used_tokens, cache_read) = usage.copied().unwrap_or((0, 0, 0));
     value["request_count"] = json!(requests);
     value["used_tokens"] = json!(used_tokens);
     value["cache_read_tokens"] = json!(cache_read);
+    value
+}
+
+fn token_json_with_limits(token: &TokenRow, full_key: bool, limits: Option<(i64, i64)>) -> Value {
+    let mut value = token_json(token, full_key);
+    let (rpm, concurrency) = limits.unwrap_or((0, 0));
+    value["rpm"] = json!(rpm);
+    value["concurrency"] = json!(concurrency);
     value
 }
 
@@ -212,6 +224,57 @@ async fn fetch_token(state: &AppState, user_id: i64, id: i64) -> Result<TokenRow
     row.ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "token not found"))
 }
 
+async fn fetch_limits(state: &AppState, token_id: i64) -> Result<(i64, i64), ApiError> {
+    let row: Option<(i64, i64)> =
+        sqlx::query_as("SELECT rpm, concurrency FROM token_rate_limits WHERE token_id=?")
+            .bind(token_id)
+            .fetch_optional(&state.pool)
+            .await
+            .map_err(internal)?;
+    Ok(row.unwrap_or((0, 0)))
+}
+
+/// 全 0 表示不限：删掉配置行（无行 = 不限），让回滚 Go new-api 时不存在语义错位。
+async fn save_limits(
+    state: &AppState,
+    token_id: i64,
+    rpm: i64,
+    concurrency: i64,
+) -> Result<(), ApiError> {
+    if rpm > 0 || concurrency > 0 {
+        sqlx::query(
+            "INSERT INTO token_rate_limits (token_id, rpm, concurrency) VALUES (?,?,?) \
+             ON CONFLICT(token_id) DO UPDATE SET rpm=excluded.rpm, concurrency=excluded.concurrency",
+        )
+        .bind(token_id)
+        .bind(rpm)
+        .bind(concurrency)
+        .execute(&state.pool)
+        .await
+        .map_err(internal)?;
+    } else {
+        sqlx::query("DELETE FROM token_rate_limits WHERE token_id=?")
+            .bind(token_id)
+            .execute(&state.pool)
+            .await
+            .map_err(internal)?;
+    }
+    state.rate_limits.set(token_id, rpm, concurrency);
+    Ok(())
+}
+
+fn validate_limits(input: &TokenInput) -> Result<(i64, i64), ApiError> {
+    let rpm = input.rpm.unwrap_or(0);
+    let concurrency = input.concurrency.unwrap_or(0);
+    if rpm < 0 || concurrency < 0 {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "Rate limits must not be negative",
+        ));
+    }
+    Ok((rpm, concurrency))
+}
+
 async fn list_page(
     state: &AppState,
     user_id: i64,
@@ -254,9 +317,29 @@ async fn list_page(
     .await
     .map_err(internal)?;
     let usage = token_usage(state, user_id).await;
+    let limit_rows: Vec<(i64, i64, i64)> = sqlx::query_as(
+        "SELECT l.token_id, l.rpm, l.concurrency FROM token_rate_limits l \
+         JOIN tokens t ON t.id = l.token_id \
+         WHERE t.user_id=? AND t.deleted_at IS NULL",
+    )
+    .bind(user_id)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(internal)?;
+    let limits_map: HashMap<i64, (i64, i64)> = limit_rows
+        .into_iter()
+        .map(|(id, rpm, concurrency)| (id, (rpm, concurrency)))
+        .collect();
     let items: Vec<Value> = rows
         .iter()
-        .map(|t| token_json_with_usage(t, false, usage.get(&t.id)))
+        .map(|t| {
+            token_json_with_usage(
+                t,
+                false,
+                usage.get(&t.id),
+                limits_map.get(&t.id).copied(),
+            )
+        })
         .collect();
     Ok(json_ok(&json!({
         "items": items,
@@ -300,7 +383,8 @@ pub async fn get_one(
     Path(id): Path<i64>,
 ) -> Result<axum::response::Response, ApiError> {
     let token = fetch_token(&state, ctx.user_id, id).await?;
-    Ok(json_ok(&token_json(&token, false)))
+    let limits = fetch_limits(&state, id).await?;
+    Ok(json_ok(&token_json_with_limits(&token, false, Some(limits))))
 }
 
 pub async fn auto_groups(
@@ -388,9 +472,15 @@ pub async fn create(
         _ => internal(e),
     })?;
     let id = result.last_insert_rowid();
+    let (rpm, concurrency) = validate_limits(&input)?;
+    save_limits(&state, id, rpm, concurrency).await?;
     state.reload_caches().await.map_err(internal)?;
     let token = fetch_token(&state, ctx.user_id, id).await?;
-    Ok(json_ok(&token_json(&token, false)))
+    Ok(json_ok(&token_json_with_limits(
+        &token,
+        false,
+        Some((rpm, concurrency)),
+    )))
 }
 
 pub async fn update(
@@ -448,9 +538,26 @@ pub async fn update(
     .execute(&state.pool)
     .await
     .map_err(internal)?;
+    // 限流字段可缺省：缺省沿用库中原值，显式给 0 则关闭对应维度。
+    let (rpm, concurrency) = {
+        let (current_rpm, current_concurrency) = fetch_limits(&state, id).await?;
+        let (rpm, concurrency) = validate_limits(&input)?;
+        let rpm = if input.rpm.is_some() { rpm } else { current_rpm };
+        let concurrency = if input.concurrency.is_some() {
+            concurrency
+        } else {
+            current_concurrency
+        };
+        save_limits(&state, id, rpm, concurrency).await?;
+        (rpm, concurrency)
+    };
     state.reload_caches().await.map_err(internal)?;
     let token = fetch_token(&state, ctx.user_id, id).await?;
-    Ok(json_ok(&token_json(&token, false)))
+    Ok(json_ok(&token_json_with_limits(
+        &token,
+        false,
+        Some((rpm, concurrency)),
+    )))
 }
 
 pub async fn delete_one(
@@ -465,6 +572,12 @@ pub async fn delete_one(
         .execute(&state.pool)
         .await
         .map_err(internal)?;
+    sqlx::query("DELETE FROM token_rate_limits WHERE token_id=?")
+        .bind(id)
+        .execute(&state.pool)
+        .await
+        .map_err(internal)?;
+    state.rate_limits.remove(id);
     state.reload_caches().await.map_err(internal)?;
     Ok(json_ok(&Value::Null))
 }
@@ -484,6 +597,12 @@ pub async fn batch_delete(
         .execute(&state.pool)
         .await
         .map_err(internal)?;
+        sqlx::query("DELETE FROM token_rate_limits WHERE token_id=?")
+            .bind(id)
+            .execute(&state.pool)
+            .await
+            .map_err(internal)?;
+        state.rate_limits.remove(id);
         affected += result.rows_affected();
     }
     state.reload_caches().await.map_err(internal)?;

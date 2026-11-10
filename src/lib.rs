@@ -7,6 +7,7 @@ pub mod mem;
 pub mod model;
 pub mod priority;
 pub mod quota_data;
+pub mod ratelimit;
 pub mod relay;
 pub mod retention;
 pub mod retry;

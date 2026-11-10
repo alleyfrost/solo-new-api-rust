@@ -39,6 +39,16 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("{e}");
         std::process::exit(2);
     })?;
+    // 每-token 限流配置独立成表，不动任何现有表结构；Go new-api 会无视未知表，
+    // 回滚/混用安全。无该配置时行数恒为 0，查询空表不影响任何路径。
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS token_rate_limits (\
+         token_id INTEGER PRIMARY KEY, \
+         rpm INTEGER NOT NULL DEFAULT 0, \
+         concurrency INTEGER NOT NULL DEFAULT 0)",
+    )
+    .execute(&pool)
+    .await?;
     match solo_new_api_rust::quota_data::backfill(&pool).await {
         Ok(stats) if stats.inserted > 0 => eprintln!(
             "quota_data backfill: cutoff={} deleted={} inserted={}",
@@ -51,7 +61,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let jwt_secret = auth::session::load_or_create_secret(&config.jwt_secret_path)?;
     let (log_tx, log_rx) = logging::channel(20_000);
     let writer = logging::spawn_writer(pool.clone(), log_rx);
-    let state = state::AppState::new(config.clone(), pool, caches, jwt_secret, Some(log_tx));
+    let limits = std::sync::Arc::new(solo_new_api_rust::ratelimit::RateLimitRegistry::default());
+    limits.load(&pool).await?;
+    let mut state = state::AppState::new(config.clone(), pool, caches, jwt_secret, Some(log_tx));
+    state.rate_limits = limits;
     solo_new_api_rust::mem::spawn_periodic_trim();
     solo_new_api_rust::retention::spawn(state.clone());
 
