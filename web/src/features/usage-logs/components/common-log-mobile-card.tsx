@@ -40,7 +40,7 @@ import { ModelBadge, ResponseModelDetails } from './model-badge'
 import { StreamTpsCell, TimingMetricsCell } from './timing-metrics-cell'
 import { useUsageLogsContext } from './usage-logs-provider'
 
-type FieldName = 'model' | 'channel' | 'token' | 'group' | 'time' | 'ip'
+type FieldName = 'model' | 'channel' | 'token' | 'group' | 'time'
 type LogField = {
   label: string
   value: string
@@ -92,19 +92,13 @@ export function CommonLogMobileCard<TData>(props: {
       visible: displayable && props.cells.has('token_name') && !!group,
       sensitive: true,
     },
-    ip: {
-      label: t('IP'),
-      value: log.ip,
-      visible: props.cells.has('ip') && !!log.ip,
-      sensitive: true,
-    },
   }
   const selected = selectedField ? fields[selectedField] : undefined
   const activeField =
     selected?.visible && (!selected.sensitive || context.sensitiveVisible)
       ? selected
       : undefined
-  const metadata: FieldName[] = ['channel', 'token', 'group', 'ip']
+  const metadata: FieldName[] = ['channel', 'token', 'group']
   const visibleMetadata = metadata.filter((id) => fields[id].visible)
   const contentCell = props.cells.get('content')
   const channelCell = props.cells.get('channel')
