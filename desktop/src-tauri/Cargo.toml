@@ -1,0 +1,29 @@
+[package]
+name = "solo-new-api-desktop"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96.0"
+
+[lib]
+name = "solo_new_api_desktop"
+path = "src/lib.rs"
+
+[[bin]]
+name = "solo-new-api-desktop"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2.7.4", features = [] }
+
+[dependencies]
+tauri = { version = "2.12.5", features = ["tray-icon"] }
+tauri-plugin-dialog = "2.8.4"
+tauri-plugin-opener = "2.7.3"
+tauri-plugin-single-instance = "2.5.5"
+solo-new-api-rust = { path = "../.." }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time"] }
+
+[dev-dependencies]
+sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio", "macros"] }
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

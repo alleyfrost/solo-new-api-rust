@@ -1,5 +1,5 @@
 [workspace]
-members = ["."]
+members = [".", "desktop/src-tauri"]
 default-members = ["."]
 resolver = "3"
 
