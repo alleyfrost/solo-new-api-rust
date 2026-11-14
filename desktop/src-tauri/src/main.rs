@@ -1,8 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use solo_new_api_desktop::{bootstrap, server_task, server_task::ServerHandle, tray};
 use solo_new_api_rust::config::Config;
@@ -99,11 +99,11 @@ fn main() {
                 api.prevent_exit();
                 let handle = app.clone();
                 std::thread::spawn(move || {
-                    if let Some(state) = handle.try_state::<AppState>() {
-                        if let Some(server) = state.server.lock().unwrap().take() {
-                            let _ = server.shutdown.send(());
-                            let _ = server.join.join();
-                        }
+                    if let Some(state) = handle.try_state::<AppState>()
+                        && let Some(server) = state.server.lock().unwrap().take()
+                    {
+                        let _ = server.shutdown.send(());
+                        let _ = server.join.join();
                     }
                     handle.exit(0);
                 });

@@ -42,7 +42,9 @@ pub async fn serve(
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<(), ServeError> {
     let pool = db::connect(&config.db_path).await.map_err(other)?;
-    db::validate_schema(&pool).await.map_err(ServeError::Schema)?;
+    db::validate_schema(&pool)
+        .await
+        .map_err(ServeError::Schema)?;
     // 每-token 限流配置独立成表，不动任何现有表结构；Go new-api 会无视未知表，
     // 回滚/混用安全。无该配置时行数恒为 0，查询空表不影响任何路径。
     sqlx::query(
@@ -63,7 +65,8 @@ pub async fn serve(
         Err(e) => eprintln!("quota_data backfill failed: {e}"),
     }
     let caches = state::Caches::load(&pool).await.map_err(other)?;
-    let jwt_secret = auth::session::load_or_create_secret(&config.jwt_secret_path).map_err(other)?;
+    let jwt_secret =
+        auth::session::load_or_create_secret(&config.jwt_secret_path).map_err(other)?;
     let (log_tx, log_rx) = logging::channel(20_000);
     let writer = logging::spawn_writer(pool.clone(), log_rx);
     let limits = std::sync::Arc::new(crate::ratelimit::RateLimitRegistry::default());
@@ -75,8 +78,14 @@ pub async fn serve(
 
     let login_route = axum::Router::new()
         .route("/api/user/login", axum::routing::post(routes::user::login))
-        .route("/api/user/auth/refresh", axum::routing::post(routes::user::refresh))
-        .route("/api/user/auth/logout", axum::routing::post(routes::user::logout));
+        .route(
+            "/api/user/auth/refresh",
+            axum::routing::post(routes::user::refresh),
+        )
+        .route(
+            "/api/user/auth/logout",
+            axum::routing::post(routes::user::logout),
+        );
     let self_route = axum::Router::new()
         .route(
             "/api/user/self",
@@ -111,8 +120,14 @@ pub async fn serve(
             auth::admin::admin_auth,
         ));
     let relay_routes = axum::Router::new()
-        .route("/v1/models", axum::routing::get(routes::models::list_models))
-        .route("/v1/models/{model}", axum::routing::get(routes::models::retrieve_model))
+        .route(
+            "/v1/models",
+            axum::routing::get(routes::models::list_models),
+        )
+        .route(
+            "/v1/models/{model}",
+            axum::routing::get(routes::models::retrieve_model),
+        )
         .route(
             "/v1/chat/completions",
             axum::routing::post(crate::relay::chat::chat_completions),
@@ -172,9 +187,10 @@ pub async fn serve(
             state.clone(),
             auth::token::token_auth,
         ));
-    let admin_routes = routes::admin::router().route_layer(
-        axum::middleware::from_fn_with_state(state.clone(), auth::admin::admin_auth),
-    );
+    let admin_routes = routes::admin::router().route_layer(axum::middleware::from_fn_with_state(
+        state.clone(),
+        auth::admin::admin_auth,
+    ));
     // 对话调试页走会话认证，不带客户端 token；选路与 /v1 走同一套流水线。
     let playground_route = axum::Router::new()
         .route(

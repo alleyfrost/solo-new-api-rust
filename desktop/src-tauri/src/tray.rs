@@ -77,10 +77,9 @@ fn chinese_locale() -> bool {
         if let Ok(output) = std::process::Command::new("defaults")
             .args(["read", "-g", "AppleLanguages"])
             .output()
+            && String::from_utf8_lossy(&output.stdout).contains("zh")
         {
-            if String::from_utf8_lossy(&output.stdout).contains("zh") {
-                return true;
-            }
+            return true;
         }
     }
     false

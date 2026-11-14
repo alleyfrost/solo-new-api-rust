@@ -57,8 +57,7 @@ pub fn start(config: Config) -> Result<ServerHandle, String> {
                 let shutdown = async move {
                     let _ = shutdown_rx.await;
                 };
-                if let Err(e) = solo_new_api_rust::server::serve(config, listener, shutdown).await
-                {
+                if let Err(e) = solo_new_api_rust::server::serve(config, listener, shutdown).await {
                     eprintln!("server stopped: {e}");
                 }
             });

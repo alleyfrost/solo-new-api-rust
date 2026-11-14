@@ -52,7 +52,7 @@ async fn shutdown_signal() {
     };
     #[cfg(unix)]
     let term = async {
-        use tokio::signal::unix::{signal, SignalKind};
+        use tokio::signal::unix::{SignalKind, signal};
         signal(SignalKind::terminate()).unwrap().recv().await;
     };
     #[cfg(not(unix))]

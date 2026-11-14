@@ -85,6 +85,19 @@ bun run dev          # 或开发服务器
 
 首次启动会校验必需表/列；缺表直接退出并打印缺失项，不会改动数据库。
 
+### 桌面应用（无需 Docker）
+
+`desktop/` 提供 Tauri 2 桌面版：单进程内嵌同一套服务与前端；首次启动自动建库（默认 `root/123456`），关闭窗口后隐藏到系统托盘继续后台运行。
+
+```bash
+cd desktop
+bun install
+bun run dev     # 本地运行（macOS / Windows / Linux）
+bun run build   # 生成安装包（macOS .app/.dmg 等）
+```
+
+详见 `desktop/README.md`。
+
 ### 配置项
 
 | 环境变量 | 默认值 | 说明 |
@@ -135,6 +148,7 @@ src/
   db.rs        SQLite 连接与 schema 校验
   settings.rs  options 白名单与校验
 web/           new-api React 前端 fork（裁剪 + 单用户改造）
+desktop/       Tauri 2 桌面应用（单进程内嵌服务与前端，可常驻托盘）
 deploy/        交叉编译、打包、本地/服务器运行脚本
 tests/         集成测试（wiremock）
 vendor/        switchyard-translation（Apache-2.0，固定版本）
