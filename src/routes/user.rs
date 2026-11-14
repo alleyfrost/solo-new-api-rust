@@ -92,10 +92,43 @@ pub async fn login(
     Ok(response)
 }
 
+/// 桌面本地模式的会话：沿用 refresh 协议返回一个长期有效的 bundle，前端现有
+/// 认证流程无需改动即可直接进入管理界面。仅当服务绑定回环地址时才会走到这里。
+fn desktop_auth_bundle(state: &AppState) -> Result<Response, ApiError> {
+    let Some((_, user)) = crate::auth::admin::desktop_admin(state) else {
+        return Err(ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "No administrator account is available",
+        ));
+    };
+    let active = session::now();
+    let expires_at = active + 10 * 365 * 24 * 60 * 60;
+    let bundle = session::AuthBundle {
+        access_token: "desktop-session".to_string(),
+        token_type: "Bearer",
+        access_expires_at: expires_at,
+        user: session::user_json(&user),
+        session: session::SessionView {
+            sid: "desktop".to_string(),
+            current: true,
+            login_method: "desktop".to_string(),
+            ip: "127.0.0.1".to_string(),
+            user_agent: "desktop".to_string(),
+            created_at: active,
+            last_active_at: active,
+            expires_at,
+        },
+    };
+    Ok(json_ok(&bundle))
+}
+
 pub async fn refresh(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
+    if state.disable_login {
+        return desktop_auth_bundle(&state);
+    }
     let candidates = session::parse_refresh_cookies(&headers);
     if candidates.is_empty() {
         return Err(ApiError::new(StatusCode::UNAUTHORIZED, "Session expired!"));

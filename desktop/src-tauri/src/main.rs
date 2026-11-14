@@ -18,6 +18,11 @@ struct AppState {
 }
 
 fn main() {
+    // 桌面版免登录：服务端只在回环监听时接受该开关，Web/Docker 部署始终正常登录。
+    // 此时尚未创建任何线程，进程启动阶段设置环境变量是安全的。
+    unsafe {
+        std::env::set_var("DESKTOP_DISABLE_LOGIN", "1");
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             tray::show(app);

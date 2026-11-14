@@ -73,6 +73,15 @@ pub async fn serve(
     limits.load(&pool).await.map_err(other)?;
     let mut state = state::AppState::new(config.clone(), pool, caches, jwt_secret, Some(log_tx));
     state.rate_limits = limits;
+    // 桌面免登录开关：即便环境变量被误设，也只在回环监听时生效，公网/容器部署
+    // 永远按正常登录处理（失败即关闭，绝不开放匿名管理接口）。
+    let listen_addr = listener.local_addr().map_err(other)?;
+    let login_requested = desktop_login_requested();
+    let disable_login = desktop_login_enabled(login_requested, listen_addr);
+    if login_requested && !disable_login {
+        eprintln!("DESKTOP_DISABLE_LOGIN ignored: {listen_addr} is not a loopback address");
+    }
+    state.disable_login = disable_login;
     crate::mem::spawn_periodic_trim();
     crate::retention::spawn(state.clone());
 
@@ -219,11 +228,47 @@ pub async fn serve(
         .with_state(state)
         .fallback_service(crate::web::spa_service(web_dist));
 
-    tracing::info!("listening on {}", listener.local_addr().map_err(other)?);
+    tracing::info!("listening on {listen_addr}");
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown)
         .await
         .map_err(other)?;
     let _ = tokio::time::timeout(std::time::Duration::from_secs(5), writer).await;
     Ok(())
+}
+
+fn desktop_login_requested() -> bool {
+    std::env::var("DESKTOP_DISABLE_LOGIN")
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+}
+
+pub fn desktop_login_enabled(requested: bool, addr: std::net::SocketAddr) -> bool {
+    requested && addr.ip().is_loopback()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::desktop_login_enabled;
+
+    #[test]
+    fn desktop_login_only_applies_to_loopback() {
+        assert!(desktop_login_enabled(
+            true,
+            "127.0.0.1:3000".parse().unwrap()
+        ));
+        assert!(desktop_login_enabled(true, "[::1]:3000".parse().unwrap()));
+        assert!(!desktop_login_enabled(
+            true,
+            "0.0.0.0:3000".parse().unwrap()
+        ));
+        assert!(!desktop_login_enabled(
+            true,
+            "192.168.1.10:3000".parse().unwrap()
+        ));
+        assert!(!desktop_login_enabled(
+            false,
+            "127.0.0.1:3000".parse().unwrap()
+        ));
+    }
 }

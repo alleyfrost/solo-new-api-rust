@@ -1,8 +1,8 @@
-use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex, RwLock};
-use sqlx::SqlitePool;
 use crate::config::Config;
 use crate::model::{AbilityRow, ChannelRow, TokenRow, UserRow};
+use sqlx::SqlitePool;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex, RwLock};
 
 pub struct Caches {
     pub users: HashMap<i64, UserRow>,
@@ -24,14 +24,20 @@ impl Caches {
             "SELECT id, type, `key`, status, name, models, `group`, base_url, priority, weight, channel_info, model_mapping, header_override, created_time, test_time, response_time, open_ai_organization, test_model, other, balance, balance_updated_time, used_quota, status_code_mapping, auto_ban, other_info, tag, setting, param_override, remark, settings FROM channels"
         ).fetch_all(pool).await?;
         let abilities: Vec<AbilityRow> = sqlx::query_as(
-            "SELECT `group`, model, channel_id, enabled, priority, weight FROM abilities"
-        ).fetch_all(pool).await?;
+            "SELECT `group`, model, channel_id, enabled, priority, weight FROM abilities",
+        )
+        .fetch_all(pool)
+        .await?;
         let options: Vec<(String, String)> = sqlx::query_as("SELECT `key`, value FROM options")
-            .fetch_all(pool).await?;
+            .fetch_all(pool)
+            .await?;
 
         let mut abilities_map: HashMap<(String, String), Vec<AbilityRow>> = HashMap::new();
         for a in abilities {
-            abilities_map.entry((a.group.clone(), a.model.clone())).or_default().push(a);
+            abilities_map
+                .entry((a.group.clone(), a.model.clone()))
+                .or_default()
+                .push(a);
         }
         Ok(Self {
             users: users.into_iter().map(|u| (u.id, u)).collect(),
@@ -60,6 +66,8 @@ pub struct AppState {
     pub export_slots: Arc<Mutex<HashSet<i64>>>,
     pub body_gate: Arc<crate::mem::BodyGate>,
     pub rate_limits: Arc<crate::ratelimit::RateLimitRegistry>,
+    /// 桌面本地免登录：仅当进程绑定回环地址时由 serve 打开；Web/容器部署恒为 false。
+    pub disable_login: bool,
 }
 
 impl AppState {
@@ -85,6 +93,7 @@ impl AppState {
                 settings.body_gate_huge,
             )),
             rate_limits: Arc::new(crate::ratelimit::RateLimitRegistry::default()),
+            disable_login: false,
         }
     }
 
