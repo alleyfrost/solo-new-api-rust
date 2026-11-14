@@ -15,8 +15,10 @@
 ```bash
 cd desktop
 bun install
-bun run dev      # 构建 web/dist 并启动 tauri dev；窗口加载 http://127.0.0.1:3000
+bun run dev      # 先构建 web/dist，再启动 dev；窗口加载 http://127.0.0.1:3000
 ```
+
+`bun run dev` 是开发模式：应用启动后终端会一直占用并监听文件变化，直到 Ctrl+C；它不是打包命令。直接运行 `tauri dev` 前请先执行 `bun run build:web`（脚本已自动处理，配置里不再重复构建，避免 dev 监听触发重建风暴）。
 
 首次启动自动创建数据库与管理员，数据目录：
 

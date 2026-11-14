@@ -4,8 +4,6 @@
   "version": "0.1.0",
   "identifier": "com.solo.newapi.desktop",
   "build": {
-    "beforeDevCommand": "bun run build:web",
-    "beforeBuildCommand": "bun run build:web",
     "frontendDist": "../../web/dist"
   },
   "app": {
