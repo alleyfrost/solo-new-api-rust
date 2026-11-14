@@ -1,4 +1,4 @@
-use solo_new_api_rust::{auth, config, db, logging, routes, state};
+use solo_new_api_rust::{config, server};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tune_glibc_allocator();
@@ -34,177 +34,16 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or(0);
     solo_new_api_rust::START_TIME.set(start).ok();
     let config = config::Config::from_env();
-    let pool = db::connect(&config.db_path).await?;
-    db::validate_schema(&pool).await.map_err(|e| {
-        eprintln!("{e}");
-        std::process::exit(2);
-    })?;
-    // 每-token 限流配置独立成表，不动任何现有表结构；Go new-api 会无视未知表，
-    // 回滚/混用安全。无该配置时行数恒为 0，查询空表不影响任何路径。
-    sqlx::query(
-        "CREATE TABLE IF NOT EXISTS token_rate_limits (\
-         token_id INTEGER PRIMARY KEY, \
-         rpm INTEGER NOT NULL DEFAULT 0, \
-         concurrency INTEGER NOT NULL DEFAULT 0)",
-    )
-    .execute(&pool)
-    .await?;
-    match solo_new_api_rust::quota_data::backfill(&pool).await {
-        Ok(stats) if stats.inserted > 0 => eprintln!(
-            "quota_data backfill: cutoff={} deleted={} inserted={}",
-            stats.cutoff, stats.deleted, stats.inserted
-        ),
-        Ok(_) => {}
-        Err(e) => eprintln!("quota_data backfill failed: {e}"),
-    }
-    let caches = state::Caches::load(&pool).await?;
-    let jwt_secret = auth::session::load_or_create_secret(&config.jwt_secret_path)?;
-    let (log_tx, log_rx) = logging::channel(20_000);
-    let writer = logging::spawn_writer(pool.clone(), log_rx);
-    let limits = std::sync::Arc::new(solo_new_api_rust::ratelimit::RateLimitRegistry::default());
-    limits.load(&pool).await?;
-    let mut state = state::AppState::new(config.clone(), pool, caches, jwt_secret, Some(log_tx));
-    state.rate_limits = limits;
-    solo_new_api_rust::mem::spawn_periodic_trim();
-    solo_new_api_rust::retention::spawn(state.clone());
-
-    let login_route = axum::Router::new()
-        .route("/api/user/login", axum::routing::post(routes::user::login))
-        .route("/api/user/auth/refresh", axum::routing::post(routes::user::refresh))
-        .route("/api/user/auth/logout", axum::routing::post(routes::user::logout));
-    let self_route = axum::Router::new()
-        .route(
-            "/api/user/self",
-            axum::routing::get(routes::user::self_info).put(routes::user::update_self),
-        )
-        .route(
-            "/api/user/setting",
-            axum::routing::put(routes::user::update_setting),
-        )
-        .route(
-            "/api/user/sessions",
-            axum::routing::get(routes::user::list_sessions),
-        )
-        .route(
-            "/api/user/sessions/revoke-others",
-            axum::routing::post(routes::user::revoke_other_sessions),
-        )
-        .route(
-            "/api/user/sessions/{sid}",
-            axum::routing::delete(routes::user::revoke_session),
-        )
-        .route(
-            "/api/user/self/groups",
-            axum::routing::get(routes::user::self_groups),
-        )
-        .route(
-            "/api/user/models",
-            axum::routing::get(routes::user::user_models),
-        )
-        .route_layer(axum::middleware::from_fn_with_state(
-            state.clone(),
-            auth::admin::admin_auth,
-        ));
-    let relay_routes = axum::Router::new()
-        .route("/v1/models", axum::routing::get(routes::models::list_models))
-        .route("/v1/models/{model}", axum::routing::get(routes::models::retrieve_model))
-        .route(
-            "/v1/chat/completions",
-            axum::routing::post(solo_new_api_rust::relay::chat::chat_completions),
-        )
-        .route(
-            "/v1/messages",
-            axum::routing::post(solo_new_api_rust::relay::messages::messages),
-        )
-        .route(
-            "/v1/responses",
-            axum::routing::post(solo_new_api_rust::relay::responses::responses),
-        )
-        .route(
-            "/v1/embeddings",
-            axum::routing::post(solo_new_api_rust::relay::extra::embeddings),
-        )
-        .route(
-            "/v1/images/generations",
-            axum::routing::post(solo_new_api_rust::relay::extra::image_generations),
-        )
-        .route(
-            "/v1/images/edits",
-            axum::routing::post(solo_new_api_rust::relay::extra::image_edits),
-        )
-        .route(
-            "/v1/audio/transcriptions",
-            axum::routing::post(solo_new_api_rust::relay::extra::audio_transcriptions),
-        )
-        .route(
-            "/v1/audio/translations",
-            axum::routing::post(solo_new_api_rust::relay::extra::audio_translations),
-        )
-        .route(
-            "/v1/audio/speech",
-            axum::routing::post(solo_new_api_rust::relay::extra::audio_speech),
-        )
-        .route(
-            "/v1/rerank",
-            axum::routing::post(solo_new_api_rust::relay::extra::rerank),
-        )
-        .route(
-            "/v1/completions",
-            axum::routing::post(solo_new_api_rust::relay::extra::completions),
-        )
-        .route(
-            "/v1/moderations",
-            axum::routing::post(solo_new_api_rust::relay::extra::moderations),
-        )
-        .layer(axum::extract::DefaultBodyLimit::max(
-            config.max_request_bytes,
-        ))
-        .layer(axum::middleware::from_fn_with_state(
-            state.clone(),
-            solo_new_api_rust::mem::large_body_gate,
-        ))
-        .route_layer(axum::middleware::from_fn_with_state(
-            state.clone(),
-            auth::token::token_auth,
-        ));
-    let admin_routes = routes::admin::router().route_layer(
-        axum::middleware::from_fn_with_state(state.clone(), auth::admin::admin_auth),
-    );
-    // 对话调试页走会话认证，不带客户端 token；选路与 /v1 走同一套流水线。
-    let playground_route = axum::Router::new()
-        .route(
-            "/pg/chat/completions",
-            axum::routing::post(solo_new_api_rust::relay::playground::chat_completions),
-        )
-        .layer(axum::extract::DefaultBodyLimit::max(
-            config.max_request_bytes,
-        ))
-        .layer(axum::middleware::from_fn_with_state(
-            state.clone(),
-            solo_new_api_rust::mem::large_body_gate,
-        ))
-        .route_layer(axum::middleware::from_fn_with_state(
-            state.clone(),
-            auth::admin::admin_auth,
-        ));
-    let web_dist = config.web_dist.clone();
-    let app = axum::Router::new()
-        .merge(routes::public_router())
-        .merge(login_route)
-        .merge(self_route)
-        .merge(admin_routes)
-        .merge(playground_route)
-        .merge(relay_routes)
-        .with_state(state)
-        .fallback_service(solo_new_api_rust::web::spa_service(web_dist));
-
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", config.port)).await?;
     tracing::info!("listening on :{}", config.port);
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), writer).await;
-    Ok(())
+    match server::serve(config, listener, shutdown_signal()).await {
+        Ok(()) => Ok(()),
+        Err(server::ServeError::Schema(e)) => {
+            eprintln!("{e}");
+            std::process::exit(2);
+        }
+        Err(e) => Err(e.into()),
+    }
 }
 
 async fn shutdown_signal() {
