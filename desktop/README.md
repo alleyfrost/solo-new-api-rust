@@ -60,8 +60,10 @@ bun run build    # 构建 web/dist + tauri build；产物在 target/release/bund
 ## 图标
 
 ```bash
-bun run icons    # 需要自行提供 1024×1024 PNG
+bun run icons    # 从 desktop/app-icon.png（1024×1024，内容四周留透明边距）重新生成
 ```
+
+`app-icon.png` 已按 macOS 图标网格留白（内容约占画布 80%），避免 Dock 中显得比其它应用偏大；更换品牌图时替换该文件后重新运行即可。
 
 ## 测试
 
