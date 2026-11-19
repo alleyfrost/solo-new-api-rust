@@ -96,8 +96,19 @@ fn main() {
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app, event| {
-            if let RunEvent::ExitRequested { api, .. } = event {
+        .run(|app, event| match event {
+            // macOS：窗口隐藏后点击 Dock / Finder 图标不会启动新进程，只会发 reopen；
+            // 不处理就会“点不开”，这里恢复主窗口。
+            #[cfg(target_os = "macos")]
+            RunEvent::Reopen {
+                has_visible_windows,
+                ..
+            } => {
+                if !has_visible_windows {
+                    tray::show(app);
+                }
+            }
+            RunEvent::ExitRequested { api, .. } => {
                 if EXITING.swap(true, Ordering::SeqCst) {
                     return;
                 }
@@ -113,6 +124,7 @@ fn main() {
                     handle.exit(0);
                 });
             }
+            _ => {}
         });
 }
 
